@@ -136,8 +136,9 @@ def collect_all(collector):
             print(f'{source}: {len(listings)} listings, {sum(is_match(item) for item in listings)} eligible matches', flush=True)
         except Exception as error:
             # Exception text from mail libraries can contain private addresses. Only source errors/types are recorded here.
-            scans[source] = {'error': type(error).__name__}
-            print(f'{source}: source check failed ({type(error).__name__})', flush=True)
+            detail = str(error)[:250] if isinstance(error, (RuntimeError, ValueError)) else type(error).__name__
+            scans[source] = {'error': detail}
+            print(f'{source}: source check failed ({detail})', flush=True)
     collector.save_cache()
     return scans
 
