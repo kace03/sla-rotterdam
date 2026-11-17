@@ -24,9 +24,11 @@ STOP cannot recall an email Gmail already accepted. GitHub still wakes scheduled
 ## What counts as a match
 
 - The listing says **Rotterdam**, not a nearby town.
-- Advertised monthly rent is **up to and including EUR 2,000**. Utilities and service charges may cost extra.
-- It explicitly has **at least two bedrooms**. Two rooms alone is not enough.
+- Known advertised monthly rent is **up to and including EUR 2,000**. Utilities and service charges may cost extra.
+- If the bedroom count is known, it has **at least two bedrooms**. Total rooms are not treated as bedrooms.
 - It is not marked rented, closed or unavailable in the data we can read.
+
+Missing or unreadable rent, bedroom count or availability no longer discards a Rotterdam candidate. The email marks the field **Unknown**, explains what could not be verified, and asks you to check the listing yourself. Known rent above EUR 2,000, fewer than two known bedrooms, a different city or a known unavailable status still excludes it. The city must be identifiable as Rotterdam from the source data, the Wonen Hartje Rotterdam URL pattern, or previously read details; an entirely unknown city is not guessed.
 
 Student-only and other restrictions are included as notes where detected. A match still needs checking with the agent for eligibility, actual costs and availability.
 
@@ -72,9 +74,9 @@ If the collection gives a `next_page_url`, the program requests that page too. I
 
 The program requests [Wonen Hartje's Rotterdam overview](https://wonenhartje.nl/rotterdam/aanbod-rotterdam/) and uses **Beautiful Soup**, an HTML-reading library, to find property links matching that site's Rotterdam rental URL pattern.
 
-For each discovered property, it reads the detail page or a recent cached copy of its parsed details. It finds the page elements containing the price, title and specification labels, including `Slaapkamers`, `Verhuurvorm` and `Status`. It takes the bedroom count from the bedroom specification, rather than treating the overview's room count as bedrooms.
+For each discovered property, it reads the detail page or a recent cached copy of its parsed details. It finds the page elements containing the price, title and specification labels, including `Slaapkamers`, `Verhuurvorm` and `Status`. It takes the bedroom count from the bedroom specification, rather than treating the overview's room count as bedrooms. If a field is missing, it is kept as unknown instead of stopping the source scan.
 
-A property must say it is for rent and have an available status. If its status field is empty but the page's availability label says `Beschikbaar`, that label is used. The current reader identifies Rotterdam from the property's Rotterdam URL pattern. It does **not** independently verify the address against a map or postcode database. A simple text check also adds a note when it detects a student-only restriction; it does not understand every possible eligibility condition.
+Known non-rental or unavailable properties are excluded. Missing availability is flagged for manual checking. If its status field is empty but the page's availability label says `Beschikbaar`, that label is used. The current reader identifies Rotterdam from the property's Rotterdam URL pattern. It does **not** independently verify the address against a map or postcode database. A simple text check also adds a note when it detects a student-only restriction; it does not understand every possible eligibility condition.
 
 #### Woonzeker: discover pages through a sitemap, then decode embedded data
 
@@ -82,7 +84,7 @@ The program requests [Woonzeker's public property sitemap](https://woonzeker.com
 
 Those pages contain a script block named `__NUXT_DATA__`. This holds the structured data used by the site's Nuxt web framework. Some values refer to other positions in a shared list, so the decoder follows those references to reconstruct the property record.
 
-It then reads the price from `handover.price`, the bedrooms from `characteristic.layout.number_of_bedrooms`, and the city from `address.location`. Both the property's stage and status code must say `available`. A property that has not appeared in the sitemap cannot yet be discovered by this reader.
+It then reads the price from `handover.price`, the bedrooms from `characteristic.layout.number_of_bedrooms`, and the city from `address.location`. The reader treats the property as confirmed available when both its stage and status code say `available`. Missing availability fields are marked unknown; an explicit non-available status still excludes it. A property that has not appeared in the sitemap cannot yet be discovered by this reader.
 
 ### 4. Convert the results into one common listing format
 
@@ -100,9 +102,9 @@ The three readers produce the same basic fields, despite getting them from diffe
 }
 ```
 
-Prices and bedroom counts are converted to numbers where the reader needs to do so. The common filter then checks city, rent, bedrooms and availability. For example, the record above passes the price and bedroom rules; the same record with rent 2050 or only one bedroom fails. Missing or unreadable price/bedroom values do not qualify.
+Prices and bedroom counts are converted to numbers where the reader needs to do so. The common filter then checks city, rent, bedrooms and availability. For example, the record above passes the price and bedroom rules; the same record with rent 2050 or only one bedroom fails. Missing or unreadable price/bedroom values are kept as unknown and the candidate can still be emailed, with explicit warnings that those filters have not been verified.
 
-The program uses explicit fields and fixed rules. It does not use AI to guess missing bedrooms, estimate the rent from a photo, or infer that a two-room apartment has two bedrooms. Its conclusions depend on what each website publishes and on the extraction rules continuing to match that website.
+The program uses explicit fields and fixed rules. It does not use AI to guess missing bedrooms, estimate the rent from a photo, or infer that a two-room apartment has two bedrooms. Its conclusions depend on what each website publishes and on the extraction rules continuing to match that website. Unknown fields stay unknown; their warning is not a claim that the property meets that requirement.
 
 ### 5. Compare with history, then send through Gmail
 
@@ -123,6 +125,10 @@ A blocked request, timeout, unexpected response or missing required page structu
 If at least one source succeeds, the monitor continues with those sources and adds a GitHub warning and a **PARTIAL COVERAGE** notice to the summary. Failed-source counts are shown as unknown, not zero. A green run with this warning does not mean every website was checked. If every source fails, the run fails. State or email errors still fail the run too.
 
 A site may allow requests from a home computer while blocking GitHub's runner. For example, Wonen Hartje can return a page titled “One moment, please…” instead of its listings. The monitor recognises that as an access challenge; it cannot treat it as property data or promise to get through it. It tries the source again on the next normal check. Changing the rent limit does not cause this blocking.
+
+Individual Wonen Hartje and Woonzeker detail pages are isolated too: if one cannot be read, other properties are still processed. The failed property uses previously cached details with a warning where available. Without cached details, it keeps its discovered link and unknown fields; it can be emailed only if Rotterdam is still identifiable. Cached closed or otherwise disqualifying details still exclude it. These fallback records are not saved as fresh successful detail reads.
+
+Single-listing emails include notices when other websites or property pages could not be checked during that scan. Combined emails also identify incomplete coverage. Pending records absent from an incomplete source scan are left pending, rather than treated as expired or sent from unverified old history.
 
 These checks catch many changes, but cannot detect every possible mistake or website redesign. If a site changes its field names, HTML layout, status values or sitemap format, its reader may need updating.
 
