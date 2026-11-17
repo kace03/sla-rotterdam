@@ -1,0 +1,31 @@
+name: Email connection check
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/email-check.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  email-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Check configured secrets and send one test email
+        env:
+          RUN_MODE: test_email
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_RECIPIENT: ${{ secrets.ALERT_RECIPIENT }}
+        run: |
+          python -c "import os; keys=['GMAIL_SENDER','GMAIL_APP_PASSWORD','ALERT_RECIPIENT']; missing=[k for k in keys if not os.environ.get(k)]; print('All three required secrets are present' if not missing else 'Missing secret names: '+', '.join(missing)); raise SystemExit(bool(missing))"
+          python -u monitor.py
