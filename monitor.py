@@ -221,7 +221,15 @@ def summary(scans, mode, state=None, sent=0):
              '| Source | Listings read | Eligible matches | Result |', '| --- | ---: | ---: | --- |']
     for name, scan in scans.items():
         rows = scan.get('listings', [])
-        lines.append(f"| {name} | {len(rows)} | {sum(is_match(row) for row in rows)} | {'Failed' if 'error' in scan else 'Read successfully'} |")
+        if 'error' in scan:
+            lines.append(f'| {name} | Unknown | Unknown | Unavailable; not checked successfully |')
+        else:
+            lines.append(f'| {name} | {len(rows)} | {sum(is_match(row) for row in rows)} | Read successfully |')
+    failed = [name for name, scan in scans.items() if 'error' in scan]
+    if failed:
+        outcome = 'PARTIAL COVERAGE' if len(failed) < len(scans) else 'NO SOURCE COVERAGE'
+        lines.extend(['', f'**{outcome}:** could not check ' + ', '.join(failed) + '.',
+                      'Successful sources can still produce alerts. Failed sources are retried on the next normal check; their old pending alerts are not sent.'])
     if state:
         held = sum(row['status'] == 'sending' for row in state['listings'].values())
         lines.extend(['', f'Uncertain deliveries held for review: **{held}**.'])
@@ -233,6 +241,14 @@ def summary(scans, mode, state=None, sent=0):
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf8') as stream:
             stream.write(text)
+
+
+def scan_exit_code(scans):
+    failed = [name for name, scan in scans.items() if 'error' in scan]
+    for name in failed:
+        print(f'::warning title=Rental source unavailable::{name} could not be checked. Coverage is incomplete; see the run summary and source log.', flush=True)
+    # A source outage is not a crash of the entire monitor. Complete outages still fail.
+    return int(not scans or len(failed) == len(scans))
 
 
 def main(environ=os.environ):
@@ -297,7 +313,7 @@ def main(environ=os.environ):
                 sent = deliver(state, store, lambda: GmailSender(environ), allowed_sources=allowed)
     finally:
         summary(scans, mode, state, sent)
-    return int(any('error' in scan for scan in scans.values()))
+    return scan_exit_code(scans)
 
 
 if __name__ == '__main__':
