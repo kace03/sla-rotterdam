@@ -1,0 +1,11 @@
+name: Email all current matches
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  command:
+    uses: ./.github/workflows/monitor.yml
+    with:
+      mode: send_all
+    secrets: inherit
