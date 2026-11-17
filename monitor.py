@@ -207,13 +207,31 @@ def update_state(state, scans):
             continue
         first = source not in state['initialized']
         for item in scan['listings']:
-            if not is_match(item) or item['id'] in state['listings']:
+            if item['id'] in state['listings']:
                 continue
             # Stored records contain only public listing data, never mail addresses, passwords or tokens.
-            state['listings'][item['id']] = {'status': 'baseline' if first else 'pending',
+            state['listings'][item['id']] = {'status': 'baseline' if first else 'pending' if is_match(item) else 'observed',
                 'foundAt': utc_now(), 'item': item}
         if first:
             state['initialized'].append(source)
+    return state
+
+
+def initialize_current(state, scans):
+    """Record every discoverable ID, regardless of filters, without losing delivery history."""
+    recorded_at = utc_now()
+    for source, scan in scans.items():
+        if 'error' in scan:
+            continue
+        for item in scan['listings']:
+            record = state['listings'].setdefault(item['id'], {'status':'baseline', 'foundAt':recorded_at})
+            if record['status'] == 'pending':
+                record['status'] = 'baseline'
+            record['item'] = item
+            record['baselineRecordedAt'] = recorded_at
+        if source not in state['initialized']:
+            state['initialized'].append(source)
+    state['baselineRecordedAt'] = recorded_at
     return state
 
 
@@ -263,8 +281,8 @@ def summary(scans, mode, state=None, sent=0, report=None):
     if not scans:
         if mode == 'Automatic checks enabled':
             lines.extend(['', '**Monitoring is enabled. This START command did not check any websites.**',
-                          'Each scheduled check creates a separate Apartment alerts run. Open that run to confirm what was checked.',
-                          '[View automatic runs](https://github.com/kace03/sla-rotterdam/actions/workflows/monitor.yml?query=event%3Aschedule)',
+                          'Each scheduled check creates a separate Automatic apartment checks run. Open that run to confirm what was checked.',
+                          '[View automatic runs](https://github.com/kace03/sla-rotterdam/actions/workflows/scheduled-checks.yml?query=event%3Aschedule)',
                           '[Check for new listings now](https://github.com/kace03/sla-rotterdam/actions/workflows/email-check.yml)'])
         elif mode == 'test_email':
             lines.extend(['', 'Email connection test only. No property websites were checked.'])
@@ -274,6 +292,10 @@ def summary(scans, mode, state=None, sent=0, report=None):
         report = report if report is not None else scan_report(scans, state)
         checked = sum('error' not in scan for scan in scans.values())
         lines.extend(['', f'Websites checked successfully: **{checked}/{len(scans)}**.'])
+        if mode == 'baseline':
+            total = len({item['id'] for scan in scans.values() for item in scan.get('listings', [])})
+            lines.extend(['', f'**Existing stock initialized: {total} discovered listings. No emails sent. Monitoring remains paused.**',
+                          'All discovered IDs are recorded, including listings outside the current filters. Prior sent/held delivery history is preserved.'])
         if mode == 'preview':
             lines.extend(['', '**Preview only:** websites were checked, but no listing emails were sent and history was not changed.'])
         if mode in ('live', 'preview') and all(row['compared'] for row in report.values()) and report:
@@ -334,13 +356,24 @@ def main(environ=os.environ):
     mode = environ.get('RUN_MODE', 'preview')
     if mode == 'scheduled':
         mode = 'live' if environ.get('SEND_ALERTS') == 'true' else 'preview'
-    if mode not in ('preview', 'live', 'test_email', 'send_all', 'send_random', 'start', 'stop'):
+    if mode not in ('preview', 'live', 'test_email', 'send_all', 'send_random', 'start', 'stop', 'baseline'):
         raise ValueError('Unknown run mode')
     # Every hosted command reads the same persistent switch before scraping or SMTP.
     store = GitHubState(environ) if environ.get('GITHUB_TOKEN') else None
     if mode != 'preview' and not store:
         raise ValueError('Use the hosted controls for email and start/stop commands')
     state = store.load() if store else None
+    if mode == 'baseline':
+        if state.get('enabled', True):
+            raise ValueError('Pause monitoring before initializing existing stock')
+        collector = Collector()
+        collector.cache = {}  # Establish the baseline from a fresh read.
+        scans = collect_all(collector)
+        report = scan_report(scans, state)
+        initialize_current(state, scans)
+        store.save(state)
+        summary(scans, mode, state, report=report)
+        return scan_exit_code(scans)
     if mode in ('start', 'stop'):
         state['enabled'] = mode == 'start'
         store.save(state)
