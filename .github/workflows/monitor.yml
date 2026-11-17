@@ -33,8 +33,7 @@ on:
           - send_random
           - start
           - stop
-  schedule:
-    - cron: '2-57/5 * * * *'
+          - baseline
 permissions:
   contents: write
 concurrency:
@@ -63,7 +62,7 @@ jobs:
           restore-keys: details-${{ runner.os }}-
       - id: monitor
         env:
-          RUN_MODE: ${{ github.event_name == 'push' && 'preview' || inputs.mode || 'scheduled' }}
+          RUN_MODE: ${{ inputs.mode || (github.event_name == 'push' && 'preview' || 'scheduled') }}
           SEND_ALERTS: ${{ vars.SEND_ALERTS || 'true' }}
           GITHUB_TOKEN: ${{ github.token }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
