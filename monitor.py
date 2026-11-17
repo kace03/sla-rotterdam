@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 
 from sources import Collector, is_match
 
-SOURCES = ('athome', 'pararius', 'wonenhartje', 'woonzeker')
+SOURCES = ('athome', 'wonenhartje', 'woonzeker')
 STATE_BRANCH = 'monitor-state'
 STATE_PATH = '.monitor/state.json'
 
