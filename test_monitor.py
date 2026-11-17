@@ -29,6 +29,20 @@ class Sender:
 
 
 class MonitorTests(unittest.TestCase):
+    def test_normal_live_check_sends_every_new_candidate_including_more_than_five(self):
+        state=empty_state();state['initialized']=['athome']
+        homes=[{**HOME,'id':f'athome:{n}'} for n in range(10,17)]
+        student={**HOME,'id':'athome:student','studentOnly':True}
+        scans={'athome':{'listings':homes+[student]}}
+        sender=Sender()
+        with patch('monitor.GitHubState') as store, patch('monitor.Collector'), patch('monitor.collect_all',return_value=scans), patch('monitor.GmailSender',return_value=sender), patch('monitor.summary'):
+            store.return_value.load.return_value=state
+            self.assertEqual(main({'RUN_MODE':'live','SEND_ALERTS':'true','GITHUB_TOKEN':'temporary'}),0)
+        self.assertEqual(sender.items,homes)
+        self.assertNotIn(student['id'],state['listings'])
+        self.assertTrue(all(state['listings'][home['id']]['status']=='sent' for home in homes))
+        self.assertEqual(deliver(state,Store(),lambda:Sender()),0)
+
     def test_partial_source_failure_keeps_live_alerts_from_successful_sources(self):
         state=empty_state()
         state['initialized']=['athome','wonenhartje','woonzeker']
