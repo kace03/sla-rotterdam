@@ -42,9 +42,29 @@ def bedrooms(value):
 
 
 def is_match(item):
-    return (item.get('available', True) and item.get('city', '').strip().casefold() == 'rotterdam'
-            and isinstance(item.get('rent'), (int, float)) and 0 < item['rent'] <= 2000
-            and isinstance(item.get('bedrooms'), int) and item['bedrooms'] >= 2)
+    rent, beds = item.get('rent'), item.get('bedrooms')
+    return (item.get('available') is not False and item.get('city', '').strip().casefold() == 'rotterdam'
+            and (not valid_rent(rent) or rent <= 2000)
+            and (not valid_bedrooms(beds) or beds >= 2))
+
+
+def valid_rent(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+
+
+def valid_bedrooms(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def listing_warnings(item):
+    notes = list(item.get('collectionWarnings', []))
+    if not valid_rent(item.get('rent')):
+        notes.append('Could not read the rent: the EUR 2,000 maximum has not been verified.')
+    if not valid_bedrooms(item.get('bedrooms')):
+        notes.append('Could not read the bedroom count: the minimum of two bedrooms has not been verified.')
+    if item.get('available', True) is None:
+        notes.append('Could not verify current availability. Check the listing with the agent.')
+    return notes
 
 
 def at_home_page(html):
@@ -90,6 +110,7 @@ class Collector:
         if not isinstance(self.cache, dict):
             self.cache = {}
         self.last_request = 0
+        self.issues = []
 
     def get(self, url):
         if self.fetcher:
@@ -137,6 +158,21 @@ class Collector:
         self.cache[url] = {'time': int(time.time()), 'item': item}
         return item
 
+    def detail_or_fallback(self, url, parser, city=''):
+        try:
+            return self.cached_detail(url, parser)
+        except Exception as error:
+            # One inaccessible/broken property page must not discard the other properties.
+            self.issues.append({'url': url, 'reason': type(error).__name__})
+            saved = self.cache.get(url, {}).get('item')
+            if isinstance(saved, dict):
+                row = dict(saved)
+                row['collectionWarnings'] = ['Could not refresh this property page; details below are from an older cached read.']
+                return row
+            return dict(title=urlparse(url).path.rstrip('/').split('/')[-1], city=city, rent=None,
+                        bedrooms=None, url=url, rental=True, status='Unknown', openForResponses=None,
+                        conditionsNote='', collectionWarnings=['Could not read this property page; only its discovery link is available.'])
+
     def wonenhartje(self):
         from agencies import hartje_detail
         from urllib.parse import urljoin
@@ -149,7 +185,7 @@ class Collector:
             raise ValueError(f'Wonen Hartje discovery returned {len(links)} listing links ({title[:80]}); no complete scan')
         result = []
         for link in links:
-            row = self.cached_detail(link, hartje_detail)
+            row = self.detail_or_fallback(link, hartje_detail, city='Rotterdam')
             if not row['rental']:
                 continue
             identifier = re.search(r'-(h\d+)/?$', urlparse(link).path)[1]
@@ -181,7 +217,7 @@ class Collector:
             raise ValueError('Woonzeker discovery changed; no complete scan')
         result = []
         for link in links:
-            row = self.cached_detail(link, zeker_detail)
+            row = self.detail_or_fallback(link, zeker_detail)
             row.update(id='woonzeker:' + urlparse(link).path.rstrip('/').split('/')[-1],
                 source='Woonzeker', available=row['openForResponses'],
                 costNote=f"EUR {row['rent']} per month; check service charges and utilities")
