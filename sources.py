@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
+from eligibility import STUDENT_CHECK_VERSION, at_home_restrictions, student_assessment, property_text
 
 ATHOME = 'https://athomevastgoed.nl/woningaanbod'
 
@@ -44,6 +45,7 @@ def bedrooms(value):
 def is_match(item):
     rent, beds = item.get('rent'), item.get('bedrooms')
     return (item.get('available') is not False and item.get('city', '').strip().casefold() == 'rotterdam'
+            and item.get('studentOnly') is not True
             and (not valid_rent(rent) or rent <= 2000)
             and (not valid_bedrooms(beds) or beds >= 2))
 
@@ -64,6 +66,8 @@ def listing_warnings(item):
         notes.append('Could not read the bedroom count: the minimum of two bedrooms has not been verified.')
     if item.get('available', True) is None:
         notes.append('Could not verify current availability. Check the listing with the agent.')
+    if item.get('studentOnly') is None and 'studentOnly' in item:
+        notes.append('Could not verify whether this property is restricted to students.')
     return notes
 
 
@@ -88,6 +92,7 @@ def at_home_page(html):
             title=raw.get('listingAddressIn') or raw.get('street') or '',
             city=raw.get('location', {}).get('name') or '', rent=price,
             bedrooms=bedrooms(raw.get('no_bedrooms')), url=url,
+            **student_assessment(property_text(raw)),
             costNote=f"EUR {raw.get('ah_price', '?')} {raw.get('ah_price_includes_short', '')} / month"))
     next_url = value.get('next_page_url')
     if next_url:
@@ -136,7 +141,15 @@ class Collector:
             seen_pages.add(url)
             items, url = at_home_page(self.get(url))
             all_items.extend(items)
-        return list({item['id']: item for item in all_items}.values())
+        result = list({item['id']: item for item in all_items}.values())
+        for item in result:
+            if not is_match(item):
+                continue
+            detail = self.detail_or_fallback(item['url'], at_home_restrictions, city=item['city'])
+            item.update(studentOnly=detail.get('studentOnly'), studentRestriction=detail.get('studentRestriction', ''))
+            if detail.get('collectionWarnings'):
+                item['collectionWarnings'] = list(detail['collectionWarnings'])
+        return result
 
     def save_cache(self):
         # Keep only current/recent data so a hosted runner cache stays small.
@@ -152,7 +165,9 @@ class Collector:
 
     def cached_detail(self, url, parser, ttl=900):
         saved = self.cache.get(url)
-        if isinstance(saved, dict) and isinstance(saved.get('item'), dict) and time.time() - saved.get('time', 0) < ttl:
+        if (isinstance(saved, dict) and isinstance(saved.get('item'), dict)
+                and saved['item'].get('studentCheckVersion') == STUDENT_CHECK_VERSION
+                and time.time() - saved.get('time', 0) < ttl):
             return dict(saved['item'])
         item = parser(self.get(url), url)
         self.cache[url] = {'time': int(time.time()), 'item': item}
