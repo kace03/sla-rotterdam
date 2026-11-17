@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from monitor import empty_state, update_state, deliver, GmailSender, GitHubState, send_current, main, scan_report, summary
+from monitor import empty_state, update_state, deliver, GmailSender, GitHubState, send_current, main, scan_report, summary, initialize_current
 from sources import Collector, is_match
 
 HOME = dict(id='athome:1', source='At Home Vastgoed', title='Example', city='Rotterdam',
@@ -29,6 +29,35 @@ class Sender:
 
 
 class MonitorTests(unittest.TestCase):
+    def test_initialize_records_nonmatches_and_preserves_delivery_history_and_pause(self):
+        state=empty_state();state['enabled']=False
+        state['listings'][HOME['id']]={'status':'sent','sentAt':'earlier','item':HOME}
+        state['listings']['athome:pending']={'status':'pending','item':{**HOME,'id':'athome:pending'}}
+        outside={**HOME,'id':'athome:outside','rent':3000,'bedrooms':1}
+        rows=[HOME,outside,{**HOME,'id':'athome:pending'}]
+        initialize_current(state,{'athome':{'listings':rows},'woonzeker':{'error':'blocked'}})
+        self.assertFalse(state['enabled'])
+        self.assertEqual(state['listings'][HOME['id']]['status'],'sent')
+        self.assertEqual(state['listings'][HOME['id']]['sentAt'],'earlier')
+        self.assertEqual(state['listings'][outside['id']]['status'],'baseline')
+        self.assertEqual(state['listings']['athome:pending']['status'],'baseline')
+        self.assertNotIn('woonzeker',state['initialized'])
+
+    def test_old_nonmatch_does_not_become_new_when_filters_or_details_change(self):
+        state=empty_state();state['initialized']=['athome']
+        update_state(state,{'athome':{'listings':[{**HOME,'rent':3000}]}})
+        self.assertEqual(state['listings'][HOME['id']]['status'],'observed')
+        update_state(state,{'athome':{'listings':[HOME]}})
+        self.assertEqual(deliver(state,Store(),lambda:Sender()),0)
+
+    def test_baseline_mode_runs_while_paused_without_opening_smtp_or_resuming(self):
+        with patch('monitor.GitHubState') as store, patch('monitor.Collector'), patch('monitor.collect_all',return_value={'athome':{'listings':[HOME]}}), patch('monitor.GmailSender') as sender, patch('monitor.summary'):
+            state={**empty_state(),'enabled':False};store.return_value.load.return_value=state
+            self.assertEqual(main({'RUN_MODE':'baseline','GITHUB_TOKEN':'temporary'}),0)
+            sender.assert_not_called()
+            self.assertFalse(state['enabled'])
+            self.assertEqual(state['listings'][HOME['id']]['status'],'baseline')
+
     def test_scan_report_separates_new_seen_and_first_scan_baseline(self):
         state=empty_state();state['initialized']=['athome']
         state['listings'][HOME['id']]={'status':'sent','item':HOME}
@@ -68,7 +97,7 @@ class MonitorTests(unittest.TestCase):
             store.return_value.load.return_value=state
             self.assertEqual(main({'RUN_MODE':'live','SEND_ALERTS':'true','GITHUB_TOKEN':'temporary'}),0)
         self.assertEqual(sender.items,homes)
-        self.assertNotIn(student['id'],state['listings'])
+        self.assertEqual(state['listings'][student['id']]['status'],'observed')
         self.assertTrue(all(state['listings'][home['id']]['status']=='sent' for home in homes))
         self.assertEqual(deliver(state,Store(),lambda:Sender()),0)
 
