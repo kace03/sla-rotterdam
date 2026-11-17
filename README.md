@@ -1,104 +1,57 @@
-# Rotterdam apartment alerts
+# Rotterdam rental monitor
 
-The current free setup uses **GitHub + a dedicated Gmail account**. It does not require Cloudflare, a domain name, a Google developer project, or a computer left running.
+This is our apartment watcher for Rotterdam. It checks **At Home Vastgoed, Wonen Hartje and Woonzeker** directly and emails new matching listings to the recipient saved in GitHub. It runs on GitHub's servers using a dedicated Gmail sender, so neither computer needs to stay on. It does not use the websites' email alerts. Funda is not connected.
 
-The software checks **At Home Vastgoed, Wonen Hartje and Woonzeker** directly. It does not read website email alerts. Funda is not connected.
+## Controls
 
-**Status:** Gmail connection tested successfully and receipt confirmed by the owner. Initial listing history was saved successfully on 17 November 2026. Recurring alerts are enabled in the workflow defaults. Check Actions → Apartment alerts for ongoing results.
+Use the links below while signed in to GitHub as the repository owner. On the page that opens, press **Run workflow**, leave the branch on **main**, then press the green **Run workflow** button. No passwords or extra accounts are needed for these controls.
 
-## What it looks for
-
-- Rotterdam itself.
-- Advertised monthly rent up to and including €1,800. Utilities and service charges may be extra.
-- At least two explicit bedrooms; total rooms do not substitute for bedrooms.
-- Known closed, rented or unavailable listings are excluded. Student/temporary restrictions appear as notes where identified and need checking with the agent.
-
-The first successful live scan establishes a starting point. It does not email every existing property. Later new matches are emailed once per source listing ID. The same property listed on two websites may still generate two emails.
-
-## Your account steps
-
-### 1. Create the dedicated Gmail account
-
-Use a normal free personal Gmail account. You can choose any available address. This account sends the emails; your friend's receiving address can be with any provider.
-
-Turn on [Google 2-Step Verification](https://myaccount.google.com/security). Then create an [app password](https://myaccount.google.com/apppasswords) named `Rotterdam apartment alerts`. This is a separate 16-character password for the program. Google only offers app passwords on eligible accounts with 2-Step Verification enabled.
-
-Keep both passwords private. The normal Gmail password is never needed by this program. The app password goes directly into GitHub's secret field later, not into chat or a source file. If you cannot see Google's app-password option, stop there and we will check the account setup.
-
-### 2. Publish the program in a GitHub project
-
-Project: **kace03/sla-rotterdam**.
-
-GitHub's free hosted checking at this frequency uses a **public repository**. The program and saved public listing records would be visible to others. Email addresses and the app password stay in separate GitHub secrets. No private account information is included in the prepared files.
-
-The public repository was created by its owner. Account sign-in and Gmail secret entry are completed privately by the account owner.
-
-The repository's default branch should contain this folder's files, including `.github/workflows/monitor.yml`. Do not upload the older Cloudflare prototype.
-
-### 3. Add three private GitHub secrets
-
-In the new project, open **Settings → Secrets and variables → Actions → Secrets → New repository secret**. Add:
-
-| Name | Value |
+| Control | What it does |
 | --- | --- |
-| `GMAIL_SENDER` | The dedicated Gmail address |
-| `GMAIL_APP_PASSWORD` | Its Google app password |
-| `ALERT_RECIPIENT` | The address that should receive alerts |
+| [Send a test email](https://github.com/kace03/sla-rotterdam/actions/workflows/test-email.yml) | Sends one connection-test message to the configured recipient. Does not check websites. |
+| [Email all current matches](https://github.com/kace03/sla-rotterdam/actions/workflows/send-all.yml) | Checks all three sources and sends **one email containing every current match**, including listings already sent before. Does not change normal alert history. |
+| [Email one random match](https://github.com/kace03/sla-rotterdam/actions/workflows/send-random.yml) | Checks the sources and emails one randomly chosen current match, even if it was sent before. Does not change normal alert history. Sends nothing if no matches are found. |
+| [START automatic monitoring](https://github.com/kace03/sla-rotterdam/actions/workflows/start.yml) | Resumes automatic checks and new-listing emails from the next scheduled run. Preserves history. |
+| [STOP all checks and emails](https://github.com/kace03/sla-rotterdam/actions/workflows/stop.yml) | Cancels the active monitor run when GitHub starts processing this command, then saves a persistent stop switch. Website checks and emails, including manual email controls, stay stopped until START is used. |
+| [Check for new listings now](https://github.com/kace03/sla-rotterdam/actions/workflows/email-check.yml) | Runs a normal new-listing check immediately, respecting history and the stop switch. |
 
-For the first email test, you can use an address you can check yourself as `ALERT_RECIPIENT`, then replace it with your friend's address after confirming delivery.
+These are GitHub's built-in controls, rather than a separate hosted dashboard. Only people with permission to run this repository's workflows can use them. Clicking a link alone sends nothing. Each press of Run workflow is a separate request; repeating an email command deliberately sends it again. Avoid rerunning a failed email command until checking the sender's Sent folder.
 
-These values belong only in the secret fields. They are not committed to the public program or listing history.
+After submitting a command, open its newest run. Its summary shows what was checked and how many emails Gmail accepted. A queued command has not finished yet. A green check on a command while stopped means it respected the stop switch; its summary says it is stopped. The latest START/STOP run and the saved `enabled` value in [monitor state](https://github.com/kace03/sla-rotterdam/blob/monitor-state/.monitor/state.json) show the switch setting. Older state without that field means enabled.
 
-### 4. Run the preview and email test
+STOP cannot recall an email Gmail already accepted. GitHub still wakes scheduled jobs to read the switch while stopped, but they do not visit property websites or send email. START does not email all old listings.
 
-Open **Actions → Apartment alerts → Run workflow**.
+## What counts as a match
 
-1. Choose `preview`. This checks the websites without sending email or changing alert history. Open the completed run's summary and confirm which sources succeeded from GitHub's network.
-2. Choose `test_email`. This sends one simple connection-test message to the configured recipient. Confirm it actually arrives, including checking spam.
+- The listing says **Rotterdam**, not a nearby town.
+- Advertised monthly rent is **up to and including EUR 1,800**. Utilities and service charges may cost extra.
+- It explicitly has **at least two bedrooms**. Two rooms alone is not enough.
+- It is not marked rented, closed or unavailable in the data we can read.
 
-If a source is blocked from GitHub, a local successful test does not make it ready online. We must fix or disable that source rather than claim it is being monitored.
+Student-only and other restrictions are included as notes where detected. A match still needs checking with the agent for eligibility, actual costs and availability.
 
-### 5. Live alerts and pause controls
+## Automatic emails
 
-The hosted preview, test email and initial history setup have passed. Live alerts are enabled by default in the workflow. The following optional repository variables override the defaults under **Settings → Secrets and variables → Actions → Variables**:
+The schedule requests a check every five minutes. Each source's first successful scan records existing matches without emailing them. Later, a previously unseen matching listing is emailed once per source ID. The same home advertised on two websites can produce two alerts. Normal checks send at most five pending alerts per run.
 
-| Name | Value |
-| --- | --- |
-| `SEND_ALERTS` | `true` |
-| `MONITOR_ENABLED` | `true` |
+Before sending, the program saves a delivery claim. After Gmail accepts the email it records the result. If sending fails ambiguously, that listing is held for review instead of automatically risking a duplicate. Failed source checks do not reset history or send old pending listings from that source.
 
-The starting history contains 11 existing matches, recorded without sending property emails. The schedule requests later runs every five minutes. Neither computer needs to remain on. A newly connected source still establishes its own first-run baseline.
+The history and start/stop switch live in `.monitor/state.json` on the separate `monitor-state` branch. They contain public property details and delivery status. Gmail credentials and the recipient are kept separately in GitHub secrets and are not written to source or listing history.
 
-To pause scheduled checks, set `MONITOR_ENABLED` to `false`. To allow previews but prevent scheduled property emails, set `SEND_ALERTS` to `false`.
+## Where the data comes from
 
-## Speed and free-service limits
+At Home's public property pages supply listings and pagination. Wonen Hartje's Rotterdam overview supplies links to property pages. Woonzeker uses its public property sitemap to discover property pages. The monitor reads listing details directly; it cannot discover a Woonzeker listing before that site's sitemap exposes it.
 
-This is a best-effort free monitor. GitHub can delay or drop scheduled runs, and public-repository schedules can be disabled after 60 days without repository activity. It is not a guarantee of five-minute detection or of beating other applicants.
+Normal checks reuse Wonen Hartje and Woonzeker details for up to 15 minutes to reduce repeated requests. Newly discovered links are checked immediately. The all-matches and random-match commands refresh details instead of using that cache. The all-matches email identifies failed sources if only part of a scan succeeds. If every source fails, no digest is sent; if successful sources have zero matches, the digest says so.
 
-At Home follows its listing pagination. Wonen Hartje reads its Rotterdam offer page. Woonzeker discovers URLs through its public property sitemap; that sitemap's publication delay has not been measured. Detail caching reduces repeated requests; newly discovered URLs are checked immediately, while cached Wonen Hartje and Woonzeker details refresh after 15 minutes.
+## Limits
 
-Keep using manual checks for important opportunities until the hosted monitor has demonstrated reliable operation. None of the tests guarantee availability, suitability, or acceptance by an agent.
+GitHub can delay or drop scheduled runs and can disable public-repository schedules after 60 days without repository activity. Five minutes is a requested interval, not a guaranteed delivery time. Website changes, blocking, stale source data and Gmail delivery delays can also affect results. The run summaries report source failures; this is a free best-effort watcher, not a guarantee of beating other applicants.
 
-## How it remembers sent listings
+The dedicated Gmail connection has been tested and receipt confirmed. All three sources have previously passed hosted checks. Current run results are in [Actions](https://github.com/kace03/sla-rotterdam/actions).
 
-The program saves only public listing data and delivery status in `.monitor/state.json` on a separate `monitor-state` branch. It uses GitHub's temporary workflow token for this; you do not create a personal access token.
+## Maintenance
 
-The workflow prevents overlapping runs. Before emailing, it saves a `sending` claim. After Gmail accepts the message, it saves `sent`. If submission or a later state update fails ambiguously, the claim stays held for review rather than being blindly resent. Check Gmail Sent before deciding whether such a record should be retried.
+The existing repository secrets are `GMAIL_SENDER`, `GMAIL_APP_PASSWORD` and `ALERT_RECIPIENT`. Change the receiving address through GitHub Settings → Secrets and variables → Actions. Never put an app password in a source file. The optional `SEND_ALERTS=false` repository variable still disables normal automatic property emails; manual email controls are governed by the start/stop switch.
 
-State writes failing, missing history or an unexpected state format stop the run. Source failures do not reset first-run history or result in sending stale pending matches from that source. GitHub's run summaries report counts and held deliveries without printing the sender or recipient address.
-
-## Validation completed
-
-- 10 tests for initial baselines, matching, unavailable listings, persistent delivery claims, duplicate prevention, failed state writes, mail construction, GitHub state requests and agency data parsing.
-- The integrated Wonen Hartje and Woonzeker adapters parsed the previous live captures successfully: 10 rental properties and 46 rental properties respectively, yielding 1 and 2 available-looking matches.
-- Hosted live previews successfully read all three included source sites from GitHub.
-- Gmail accepted the connection test and its receipt was confirmed. GitHub-hosted checks for all three sources and remote history writes passed. First initialization saved 11 baseline matches with no pending or uncertain deliveries.
-
-For local verification after installing `requirements.txt`, run `python -m unittest discover`. Running `python monitor.py` defaults to preview mode and does not send mail.
-
-## References
-
-- [GitHub standard runners are free for public repositories](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job)
-- [GitHub schedule behavior and limits](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
-- [Google app-password setup and account requirements](https://support.google.com/accounts/answer/185833/sign-in-with-app-passwords)
-- [Gmail SMTP connection details](https://developers.google.com/workspace/gmail/imap/imap-smtp)
+The program is split between `monitor.py` (commands, Gmail and saved history), `sources.py` (collection and matching), `agencies.py` (agency page parsing) and the workflows under `.github/workflows`. Tests run with `python -m unittest discover` after installing `requirements.txt`. A local `python monitor.py` defaults to a read-only preview.
