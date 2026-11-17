@@ -16,6 +16,7 @@ import sys
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sources import Collector, is_match, listing_warnings, valid_rent, valid_bedrooms
 
@@ -237,16 +238,65 @@ def deliver(state, store, sender_factory=GmailSender, limit=None, allowed_source
     return sent
 
 
-def summary(scans, mode, state=None, sent=0):
-    lines = ['# Rotterdam rental monitor', '', f'Mode: **{mode}**. Emails accepted by Gmail in this run: **{sent}**.', '',
-             '| Source | Listings read | Candidates | Result |', '| --- | ---: | ---: | --- |']
+def scan_report(scans, state):
+    report = {}
+    for source, scan in scans.items():
+        if 'error' in scan:
+            continue
+        ids = {item['id'] for item in scan['listings'] if is_match(item)}
+        known = set(state['listings']) if state is not None else set()
+        baseline = state is not None and source not in state['initialized']
+        report[source] = {'new': len(ids-known) if state is not None and not baseline else 0,
+                          'seen': len(ids & known), 'baseline': len(ids-known) if baseline else 0,
+                          'compared': state is not None}
+    return report
+
+
+def summary(scans, mode, state=None, sent=0, report=None):
+    now = datetime.now(timezone.utc)
+    try:
+        checked_at = now.astimezone(ZoneInfo('Europe/Amsterdam')).strftime('%d %B %Y at %H:%M:%S %Z')
+    except ZoneInfoNotFoundError:
+        checked_at = now.strftime('%d %B %Y at %H:%M:%S UTC')
+    lines = ['# Rotterdam rental monitor', '', f'Report generated: **{checked_at}**.', '',
+             f'Mode: **{mode}**. Emails accepted by Gmail in this run: **{sent}**.']
+    if not scans:
+        if mode == 'Automatic checks enabled':
+            lines.extend(['', '**Monitoring is enabled. This START command did not check any websites.**',
+                          'Each scheduled check creates a separate Apartment alerts run. Open that run to confirm what was checked.',
+                          '[View automatic runs](https://github.com/kace03/sla-rotterdam/actions/workflows/monitor.yml?query=event%3Aschedule)',
+                          '[Check for new listings now](https://github.com/kace03/sla-rotterdam/actions/workflows/email-check.yml)'])
+        elif mode == 'test_email':
+            lines.extend(['', 'Email connection test only. No property websites were checked.'])
+        else:
+            lines.extend(['', 'No property websites were checked in this run.'])
+    if scans:
+        report = report if report is not None else scan_report(scans, state)
+        checked = sum('error' not in scan for scan in scans.values())
+        lines.extend(['', f'Websites checked successfully: **{checked}/{len(scans)}**.'])
+        if mode == 'preview':
+            lines.extend(['', '**Preview only:** websites were checked, but no listing emails were sent and history was not changed.'])
+        if mode in ('live', 'preview') and all(row['compared'] for row in report.values()) and report:
+            new = sum(row['new'] for row in report.values())
+            seen = sum(row['seen'] for row in report.values())
+            baseline = sum(row['baseline'] for row in report.values())
+            lines.extend(['', f'**New candidates found: {new}.** Previously seen candidates: **{seen}**.',
+                          f'Existing candidates establishing a first-scan baseline: **{baseline}**.'])
+            if not new:
+                lines.append('**No new candidates found on the websites successfully checked.**')
+        lines.extend(['', '| Source | Listings read | Candidates | New | Previously seen | Student-only excluded | Result |',
+                      '| --- | ---: | ---: | ---: | ---: | ---: | --- |'])
     for name, scan in scans.items():
         rows = scan.get('listings', [])
         if 'error' in scan:
-            lines.append(f'| {name} | Unknown | Unknown | Unavailable; not checked successfully |')
+            lines.append(f'| {name} | Unknown | Unknown | Unknown | Unknown | Unknown | Unavailable; not checked successfully |')
         else:
             status = f"Partial details: {len(scan['warnings'])} property pages could not be refreshed" if scan.get('warnings') else 'Read successfully'
-            lines.append(f'| {name} | {len(rows)} | {sum(is_match(row) for row in rows)} | {status} |')
+            counts = report.get(name, {})
+            new = counts.get('new', 'Not compared') if counts.get('compared') else 'Not compared'
+            seen = counts.get('seen', 'Not compared') if counts.get('compared') else 'Not compared'
+            excluded = sum(row.get('studentOnly') is True for row in rows)
+            lines.append(f'| {name} | {len(rows)} | {sum(is_match(row) for row in rows)} | {new} | {seen} | {excluded} | {status} |')
     unverified = sum(bool(listing_warnings(row)) for scan in scans.values() for row in scan.get('listings', []) if is_match(row))
     if unverified:
         lines.extend(['', f'Candidates with unverified details: **{unverified}**. Emails identify what could not be checked.'])
@@ -257,7 +307,8 @@ def summary(scans, mode, state=None, sent=0):
                       'Successful sources can still produce alerts. Failed sources are retried on the next normal check; their old pending alerts are not sent.'])
     if state:
         held = sum(row['status'] == 'sending' for row in state['listings'].values())
-        lines.extend(['', f'Uncertain deliveries held for review: **{held}**.'])
+        pending = sum(row['status'] == 'pending' for row in state['listings'].values())
+        lines.extend(['', f'Pending listing emails: **{pending}**. Uncertain deliveries held for review: **{held}**.'])
     lines.extend(['', 'Funda is not connected. A five-minute schedule is best effort. Source access from this runner must be verified.',
                   'Candidates must be in Rotterdam and have no known closed/unavailable status. Known rent must be at most EUR 2,000 and known bedrooms at least two; missing details are emailed with warnings.',
                   'The first successful live scan of each source establishes a baseline and sends no existing listings.'])
@@ -312,6 +363,7 @@ def main(environ=os.environ):
     if mode in ('send_all', 'send_random'):
         collector.cache = {}  # Manual requests recheck details rather than reuse the 15-minute cache.
     scans = collect_all(collector)
+    report = scan_report(scans, state)  # Count against history before this run changes it.
     sent = 0
     try:
         if mode in ('send_all', 'send_random'):
@@ -342,7 +394,7 @@ def main(environ=os.environ):
             if pending:
                 sent = deliver(state, store, lambda: GmailSender(environ), allowed_sources=allowed, allowed_ids=set(current))
     finally:
-        summary(scans, mode, state, sent)
+        summary(scans, mode, state, sent, report=report)
     return scan_exit_code(scans)
 
 
