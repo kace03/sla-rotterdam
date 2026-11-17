@@ -1,0 +1,11 @@
+name: Email one random match
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  command:
+    uses: ./.github/workflows/monitor.yml
+    with:
+      mode: send_random
+    secrets: inherit
