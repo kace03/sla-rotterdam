@@ -43,7 +43,7 @@ def bedrooms(value):
 
 def is_match(item):
     return (item.get('available', True) and item.get('city', '').strip().casefold() == 'rotterdam'
-            and isinstance(item.get('rent'), (int, float)) and 0 < item['rent'] <= 1800
+            and isinstance(item.get('rent'), (int, float)) and 0 < item['rent'] <= 2000
             and isinstance(item.get('bedrooms'), int) and item['bedrooms'] >= 2)
 
 
