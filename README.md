@@ -23,6 +23,8 @@ STOP cannot recall an email Gmail already accepted. GitHub still wakes scheduled
 
 ## Confirming that checks are running
 
+**Verified on 17 November 2026:** a fresh no-email initialization recorded 91 currently discovered listing IDs (83 baseline records plus 8 preserved sent records). Monitoring was left paused. The shared checker and new timer workflow pass manual execution, but GitHub has not created any scheduled events, including for an independent minimal diagnostic. The timer was recreated with a standard five-minute cron and disabled/re-enabled through GitHub's API; automatic triggering remains unverified. Check the scheduled-run list before relying on automatic alerts.
+
 The START command only saves the enabled switch. Its green check does not mean a property scan happened. That page is a report for that one command; it does not update itself with later checks.
 
 Open [Automatic apartment checks](https://github.com/kace03/sla-rotterdam/actions/workflows/scheduled-checks.yml) and select the newest run. The summary now shows a report timestamp, the websites checked successfully, current candidate counts, new candidates compared with history, previously seen candidates, student-only exclusions, emails accepted by Gmail, and pending or uncertain deliveries. **No new candidates found** means the successfully checked websites had no candidates newly qualifying against the saved history. A partial-coverage warning means some websites or details could not be checked.
