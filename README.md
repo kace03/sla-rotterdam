@@ -4,7 +4,7 @@ The current free setup uses **GitHub + a dedicated Gmail account**. It does not 
 
 The software checks **At Home Vastgoed, Wonen Hartje and Woonzeker** directly. It does not read website email alerts. Funda is not connected.
 
-**Status:** software prepared for this repository. Check Actions → Apartment alerts for the hosted preview result. Gmail credentials and live alerts must be configured separately; uploading code does not enable property emails.
+**Status:** Gmail connection tested successfully and receipt confirmed by the owner. Initial listing history was saved successfully on 17 November 2026. Recurring alerts are enabled in the workflow defaults. Check Actions → Apartment alerts for ongoing results.
 
 ## What it looks for
 
@@ -58,16 +58,16 @@ Open **Actions → Apartment alerts → Run workflow**.
 
 If a source is blocked from GitHub, a local successful test does not make it ready online. We must fix or disable that source rather than claim it is being monitored.
 
-### 5. Switch on live alerts
+### 5. Live alerts and pause controls
 
-Only after the hosted preview succeeds and the test email arrives, open **Settings → Secrets and variables → Actions → Variables** and add:
+The hosted preview, test email and initial history setup have passed. Live alerts are enabled by default in the workflow. The following optional repository variables override the defaults under **Settings → Secrets and variables → Actions → Variables**:
 
 | Name | Value |
 | --- | --- |
 | `SEND_ALERTS` | `true` |
 | `MONITOR_ENABLED` | `true` |
 
-Then manually run `live` once to establish the starting history. The schedule requests later runs every five minutes. Neither computer needs to remain on.
+The starting history contains 11 existing matches, recorded without sending property emails. The schedule requests later runs every five minutes. Neither computer needs to remain on. A newly connected source still establishes its own first-run baseline.
 
 To pause scheduled checks, set `MONITOR_ENABLED` to `false`. To allow previews but prevent scheduled property emails, set `SEND_ALERTS` to `false`.
 
@@ -92,7 +92,7 @@ State writes failing, missing history or an unexpected state format stop the run
 - 10 tests for initial baselines, matching, unavailable listings, persistent delivery claims, duplicate prevention, failed state writes, mail construction, GitHub state requests and agency data parsing.
 - The integrated Wonen Hartje and Woonzeker adapters parsed the previous live captures successfully: 10 rental properties and 46 rental properties respectively, yielding 1 and 2 available-looking matches.
 - Hosted live previews successfully read all three included source sites from GitHub.
-- SMTP, GitHub-hosted source access, remote state writes and end-to-end delivery still need account-backed tests.
+- Gmail accepted the connection test and its receipt was confirmed. GitHub-hosted checks for all three sources and remote history writes passed. First initialization saved 11 baseline matches with no pending or uncertain deliveries.
 
 For local verification after installing `requirements.txt`, run `python -m unittest discover`. Running `python monitor.py` defaults to preview mode and does not send mail.
 
