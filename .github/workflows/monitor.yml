@@ -6,6 +6,18 @@ on:
       - '*.py'
       - requirements.txt
       - .github/workflows/monitor.yml
+  workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
+    secrets:
+      GMAIL_SENDER:
+        required: false
+      GMAIL_APP_PASSWORD:
+        required: false
+      ALERT_RECIPIENT:
+        required: false
   workflow_dispatch:
     inputs:
       mode:
@@ -17,16 +29,19 @@ on:
           - preview
           - test_email
           - live
+          - send_all
+          - send_random
+          - start
+          - stop
   schedule:
     - cron: '2-57/5 * * * *'
 permissions:
   contents: write
 concurrency:
   group: apartment-alerts
-  cancel-in-progress: false
+  cancel-in-progress: ${{ inputs.mode == 'stop' }}
 jobs:
   monitor:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -39,6 +54,8 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - run: python -m pip install -r requirements.txt
+      - name: Verify monitor and email commands
+        run: python -m unittest discover
       - uses: actions/cache/restore@v4
         with:
           path: .collector-cache.json
