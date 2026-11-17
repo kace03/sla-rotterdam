@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from agencies import decode_nuxt, hartje_detail
+from agencies import decode_nuxt, hartje_detail, zeker_detail
 from sources import Collector, is_match
 
 
@@ -17,6 +18,39 @@ def hartje_html(status='Bezichtiging vol'):
 
 
 class SourceTests(unittest.TestCase):
+    def test_woonzeker_missing_fields_are_unknown_but_explicit_closed_still_excludes(self):
+        item={'title':'Example','handover':None,'characteristic':None,'address':{'location':'Rotterdam'},'stage':'available'}
+        with patch('agencies.decode_nuxt',return_value={'data':{'property':item}}):
+            row=zeker_detail('', 'https://woonzeker.com/huur/woningen/example')
+            self.assertIsNone(row['rent']);self.assertIsNone(row['bedrooms']);self.assertIsNone(row['openForResponses'])
+            self.assertTrue(is_match({**row,'available':row['openForResponses']}))
+            item['status']={'code':'rented'}
+            row=zeker_detail('', 'https://woonzeker.com/huur/woningen/example')
+            self.assertFalse(is_match({**row,'available':row['openForResponses']}))
+
+    def test_missing_bedrooms_or_price_does_not_discard_a_rotterdam_listing(self):
+        html=hartje_html('Beschikbaar').replace('<div class="wh-property-price">€ 1.650</div>','').replace('<div><span><span class="mkdf-label-text">Slaapkamers</span></span><span>2</span></div>','')
+        row=hartje_detail(html,'https://wonenhartje.nl/object/example-rotterdam-h123/')
+        self.assertIsNone(row['rent']);self.assertIsNone(row['bedrooms'])
+        self.assertTrue(is_match({**row,'available':row['openForResponses']}))
+
+    def test_broken_detail_page_preserves_other_properties_and_warned_fallback(self):
+        root='https://wonenhartje.nl/rotterdam/aanbod-rotterdam/'
+        bad='https://wonenhartje.nl/object/bad-rotterdam-h123/'
+        good='https://wonenhartje.nl/object/good-rotterdam-h456/'
+        def fetch(url):
+            if url==root: return f'<a href="{bad}">Bad</a><a href="{good}">Good</a>'
+            if url==bad: raise TimeoutError('Public page unavailable')
+            return hartje_html('Beschikbaar')
+        with tempfile.TemporaryDirectory() as folder:
+            collector=Collector(Path(folder)/'cache.json',fetcher=fetch)
+            rows=collector.wonenhartje()
+        self.assertEqual(len(rows),2)
+        self.assertTrue(all(is_match(row) for row in rows))
+        self.assertIsNone(rows[0]['bedrooms']);self.assertTrue(rows[0]['collectionWarnings'])
+        self.assertEqual(rows[1]['bedrooms'],2)
+        self.assertEqual(len(collector.issues),1)
+
     def test_full_viewings_override_generic_available_label(self):
         url='https://wonenhartje.nl/object/example-rotterdam-h123/'
         row=hartje_detail(hartje_html(),url)
