@@ -1,0 +1,21 @@
+name: Fixed-time scheduler test (no scraping or email)
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/timer-clock-test.yml]
+  schedule:
+    - cron: '40 20 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  clock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record trigger and runner UTC clock
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          echo "Trigger type: $EVENT_NAME. No property websites are requested and no emails are sent."
+          date -u '+Runner UTC: %Y-%m-%d %H:%M:%S UTC'
