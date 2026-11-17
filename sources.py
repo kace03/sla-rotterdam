@@ -103,7 +103,7 @@ class Collector:
             raise RuntimeError(f'HTTP {response.status_code}; no successful scan')
         if 'text/html' not in response.headers.get('content-type', ''):
             raise RuntimeError('Unexpected response format')
-        if len(response.content) > 3_000_000 or re.search(r'<title>\s*(Just a moment|Access Denied)', response.text, re.I):
+        if len(response.content) > 3_000_000 or re.search(r'<title>\s*(Just a moment|One moment,?\s*please|Access Denied)', response.text, re.I):
             raise RuntimeError('Access challenge or oversized response')
         return response.text
 
@@ -187,6 +187,3 @@ class Collector:
                 costNote=f"EUR {row['rent']} per month; check service charges and utilities")
             result.append(row)
         return result
-
-
-
