@@ -1,0 +1,11 @@
+name: STOP all checks and emails
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  command:
+    uses: ./.github/workflows/monitor.yml
+    with:
+      mode: stop
+    secrets: inherit
