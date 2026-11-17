@@ -6,8 +6,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from monitor import empty_state, update_state, deliver, GmailSender, GitHubState
+from monitor import empty_state, update_state, deliver, GmailSender, GitHubState, send_current, main
 from sources import Collector, is_match
 
 HOME = dict(id='athome:1', source='At Home Vastgoed', title='Example', city='Rotterdam',
@@ -28,6 +29,58 @@ class Sender:
 
 
 class MonitorTests(unittest.TestCase):
+    def test_replays_filter_and_deduplicate_without_using_history(self):
+        scans={'athome': {'listings': [HOME, HOME, {**HOME, 'id':'athome:closed', 'available':False}]},
+               'woonzeker': {'error':'blocked'}}
+        class DigestSender(Sender):
+            def send_digest(self,items,failed): self.items.append((items,failed))
+        sender=DigestSender()
+        self.assertEqual(send_current(scans,'send_all',lambda:sender),1)
+        self.assertEqual(sender.items,[([HOME],['woonzeker'])])
+        self.assertTrue(sender.closed)
+        sender=Sender()
+        self.assertEqual(send_current(scans,'send_random',lambda:sender,choose=lambda rows:rows[0]),1)
+        self.assertEqual(sender.items,[HOME])
+
+    def test_no_random_mail_without_matches_or_digest_when_all_sources_failed(self):
+        def forbidden(): self.fail('SMTP must not open')
+        self.assertEqual(send_current({'athome':{'listings':[]}},'send_random',forbidden),0)
+        self.assertEqual(send_current({'athome':{'error':'blocked'}},'send_all',forbidden),0)
+
+    def test_stopped_monitor_blocks_all_checks_and_email_commands(self):
+        state={**empty_state(),'enabled':False}
+        for mode in ('scheduled','live','preview','test_email','send_all','send_random'):
+            with self.subTest(mode=mode), patch('monitor.GitHubState') as store, patch('monitor.Collector') as collector, patch('monitor.GmailSender') as sender, patch('monitor.summary'):
+                store.return_value.load.return_value=deepcopy(state)
+                self.assertEqual(main({'RUN_MODE':mode,'SEND_ALERTS':'true','GITHUB_TOKEN':'temporary'}),0)
+                collector.assert_not_called(); sender.assert_not_called();store.return_value.save.assert_not_called()
+
+    def test_start_and_stop_preserve_history_and_do_not_scan_or_send(self):
+        state=empty_state();update_state(state,{'athome':{'listings':[HOME]}})
+        for mode,enabled in [('stop',False),('start',True)]:
+            with patch('monitor.GitHubState') as store, patch('monitor.Collector') as collector, patch('monitor.GmailSender') as sender, patch('monitor.summary'):
+                store.return_value.load.return_value=deepcopy(state)
+                self.assertEqual(main({'RUN_MODE':mode,'GITHUB_TOKEN':'temporary'}),0)
+                saved=store.return_value.save.call_args.args[0]
+                self.assertIs(saved['enabled'],enabled)
+                self.assertEqual(saved['listings'],state['listings'])
+                collector.assert_not_called();sender.assert_not_called()
+
+    def test_digest_is_one_message_to_configured_recipient(self):
+        messages=[]
+        class SMTP:
+            def __init__(self,*args,**kwargs): pass
+            def login(self,*args): pass
+            def send_message(self,msg,**kwargs): messages.append((msg,kwargs));return {}
+            def quit(self): pass
+        env={'GMAIL_SENDER':'sender@gmail.com','ALERT_RECIPIENT':'friend@example.com','GMAIL_APP_PASSWORD':'abcdefghijklmnop'}
+        sender=GmailSender(env,smtp_factory=SMTP)
+        sender.send_digest([HOME,{**HOME,'title':'Second property'}],['woonzeker']);sender.close()
+        self.assertEqual(len(messages),1)
+        self.assertEqual(messages[0][1]['to_addrs'],['friend@example.com'])
+        self.assertIn('Second property',messages[0][0].get_content())
+        self.assertIn('Incomplete scan',messages[0][0].get_content())
+
     def test_each_source_initializes_independently_and_failure_does_not_reset_history(self):
         state=empty_state()
         update_state(state,{'athome':{'listings':[HOME]},'woonzeker':{'error':'blocked'}})
