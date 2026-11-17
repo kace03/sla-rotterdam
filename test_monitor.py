@@ -29,6 +29,26 @@ class Sender:
 
 
 class MonitorTests(unittest.TestCase):
+    def test_partial_source_failure_keeps_live_alerts_from_successful_sources(self):
+        state=empty_state()
+        state['initialized']=['athome','wonenhartje','woonzeker']
+        state['listings']['wonenhartje:held']={'status':'pending','item':{**HOME,'id':'wonenhartje:held'}}
+        scans={'athome':{'listings':[HOME]},'wonenhartje':{'error':'Access challenge'},'woonzeker':{'listings':[]}}
+        sender=Sender()
+        with patch('monitor.GitHubState') as store, patch('monitor.Collector'), patch('monitor.collect_all',return_value=scans), patch('monitor.GmailSender',return_value=sender), patch('monitor.summary'), patch('builtins.print'):
+            store.return_value.load.return_value=state
+            self.assertEqual(main({'RUN_MODE':'live','SEND_ALERTS':'true','GITHUB_TOKEN':'temporary'}),0)
+        self.assertEqual(sender.items,[HOME])
+        self.assertEqual(state['listings']['athome:1']['status'],'sent')
+        self.assertEqual(state['listings']['wonenhartje:held']['status'],'pending')
+
+    def test_complete_source_outage_still_fails_without_sending(self):
+        scans={name:{'error':'Access challenge'} for name in ['athome','wonenhartje','woonzeker']}
+        with patch('monitor.GitHubState') as store, patch('monitor.Collector'), patch('monitor.collect_all',return_value=scans), patch('monitor.GmailSender') as sender, patch('monitor.summary'), patch('builtins.print'):
+            store.return_value.load.return_value=empty_state()
+            self.assertEqual(main({'RUN_MODE':'live','SEND_ALERTS':'true','GITHUB_TOKEN':'temporary'}),1)
+            sender.assert_not_called()
+
     def test_replays_filter_and_deduplicate_without_using_history(self):
         scans={'athome': {'listings': [HOME, HOME, {**HOME, 'id':'athome:closed', 'available':False}]},
                'woonzeker': {'error':'blocked'}}
