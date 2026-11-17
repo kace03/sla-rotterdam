@@ -45,7 +45,11 @@ def student_assessment(text):
 
 def listing_page_text(html):
     soup = BeautifulSoup(html, 'html.parser')
-    for tag in soup.select('script, style, nav, header, footer, aside, [class*="related"], [class*="similar"]'):
+    # At Home puts server-rendered property markup in a Vue inline template.
+    # Reparse its contents so Beautiful Soup treats the text as normal page text.
+    for template in soup.find_all('template'):
+        template.replace_with(BeautifulSoup(template.decode_contents(), 'html.parser'))
+    for tag in soup.select('script, style, nav, header, footer, aside, [class*="related"], [class*="similar"], [class*="relevant-properties"]'):
         tag.decompose()
     root = soup.select_one('main') or soup.body or soup
     return root.get_text(' ', strip=True)
