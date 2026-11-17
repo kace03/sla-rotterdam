@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   monitor:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED == 'true'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -47,7 +47,7 @@ jobs:
       - id: monitor
         env:
           RUN_MODE: ${{ github.event_name == 'push' && 'preview' || inputs.mode || 'scheduled' }}
-          SEND_ALERTS: ${{ vars.SEND_ALERTS }}
+          SEND_ALERTS: ${{ vars.SEND_ALERTS || 'true' }}
           GITHUB_TOKEN: ${{ github.token }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
