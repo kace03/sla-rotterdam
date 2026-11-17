@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from monitor import empty_state, update_state, deliver, GmailSender, GitHubState, send_current, main
+from monitor import empty_state, update_state, deliver, GmailSender, GitHubState, send_current, main, scan_report, summary
 from sources import Collector, is_match
 
 HOME = dict(id='athome:1', source='At Home Vastgoed', title='Example', city='Rotterdam',
@@ -29,6 +29,35 @@ class Sender:
 
 
 class MonitorTests(unittest.TestCase):
+    def test_scan_report_separates_new_seen_and_first_scan_baseline(self):
+        state=empty_state();state['initialized']=['athome']
+        state['listings'][HOME['id']]={'status':'sent','item':HOME}
+        scans={'athome':{'listings':[HOME,{**HOME,'id':'athome:2'},{**HOME,'id':'athome:student','studentOnly':True}]},
+               'woonzeker':{'listings':[{**HOME,'id':'woonzeker:first'}]},'wonenhartje':{'error':'blocked'}}
+        report=scan_report(scans,state)
+        self.assertEqual(report['athome'],{'new':1,'seen':1,'baseline':0,'compared':True})
+        self.assertEqual(report['woonzeker']['baseline'],1)
+        self.assertNotIn('wonenhartje',report)
+        update_state(state,scans)
+        self.assertEqual(report['athome']['new'],1)
+
+    def test_start_summary_does_not_imply_a_scan_and_live_summary_identifies_no_new_results(self):
+        with patch('monitor.Path') as path, patch.dict('os.environ',{},clear=True):
+            summary({},'Automatic checks enabled',empty_state())
+            text=path.return_value.write_text.call_args.args[0]
+            self.assertIn('This START command did not check any websites',text)
+            self.assertIn('View automatic runs',text)
+            self.assertNotIn('| Source |',text)
+            state=empty_state();state['initialized']=['athome']
+            state['listings'][HOME['id']]={'status':'sent','item':HOME}
+            scans={'athome':{'listings':[HOME]},'wonenhartje':{'error':'blocked'}}
+            summary(scans,'live',state,report=scan_report(scans,state))
+            text=path.return_value.write_text.call_args.args[0]
+            self.assertIn('No new candidates found on the websites successfully checked',text)
+            self.assertIn('PARTIAL COVERAGE',text)
+            self.assertIn('Previously seen candidates: **1**',text)
+            self.assertIn('Report generated:',text)
+
     def test_normal_live_check_sends_every_new_candidate_including_more_than_five(self):
         state=empty_state();state['initialized']=['athome']
         homes=[{**HOME,'id':f'athome:{n}'} for n in range(10,17)]
