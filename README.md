@@ -38,11 +38,89 @@ Before sending, the program saves a delivery claim. After Gmail accepts the emai
 
 The history and start/stop switch live in `.monitor/state.json` on the separate `monitor-state` branch. They contain public property details and delivery status. Gmail credentials and the recipient are kept separately in GitHub secrets and are not written to source or listing history.
 
-## Where the data comes from
+## How the scraping works
 
-At Home's public property pages supply listings and pagination. Wonen Hartje's Rotterdam overview supplies links to property pages. Woonzeker uses its public property sitemap to discover property pages. The monitor reads listing details directly; it cannot discover a Woonzeker listing before that site's sitemap exposes it.
+### 1. GitHub starts a temporary computer
 
-Normal checks reuse Wonen Hartje and Woonzeker details for up to 15 minutes to reduce repeated requests. Newly discovered links are checked immediately. The all-matches and random-match commands refresh details instead of using that cache. The all-matches email identifies failed sources if only part of a scan succeeds. If every source fails, no digest is sent; if successful sources have zero matches, the digest says so.
+GitHub stores the code and runs it through **GitHub Actions**. A scheduled check or a manual control starts a temporary Linux computer called a runner. The runner downloads this repository, installs Python and the required libraries, restores the property-detail cache, and starts `monitor.py`.
+
+That Python program does the scraping. GitHub itself does not understand apartments or search the websites for us. The runner first reads the saved start/stop switch and history through GitHub's API. If the switch is off, it finishes without contacting the property websites or Gmail.
+
+### 2. The program requests public pages over HTTPS
+
+From the runner, the program makes **HTTPS GET requests** to the property websites. A GET request asks a server to return the contents of a particular URL, much like opening that URL in a browser. The websites see requests coming from GitHub's runner, not from your home computer.
+
+The response usually contains **HTML**: the text, links, labels and embedded data that a browser uses to build the visible page. A sitemap response contains **XML**, a structured list of page addresses. The program reads those responses directly. It does not take screenshots, click through a visible browser, or execute the website's JavaScript.
+
+The network library is `curl_cffi`, configured with a Chrome-style connection profile. This makes aspects of its connection resemble Chrome's; it does not run Chrome or guarantee access through website blocking. The current program reads public pages without signing in to the property websites. It does not solve CAPTCHAs.
+
+Requests are made one at a time, with at least about one second between their start times, and each request has a 20-second timeout. This keeps the program from requesting every property page at once.
+
+### 3. Each website has its own extraction rules
+
+Websites organise their data differently, so each source has its own reader. **Parsing** means finding known fields or labels in the returned text and turning their values into something the program can use.
+
+#### At Home Vastgoed: read the property data inside the page
+
+The program requests [At Home's property overview](https://athomevastgoed.nl/woningaanbod). Inside that page's source is a structured property collection associated with `SET_PROPERTIES_COLLECTION`. It is JSON, a text format with named fields and values that the website also uses to display its listings.
+
+The reader extracts each property's ID, address/title, city, advertised price, bedroom count, link and status. For example, the bedroom field is `no_bedrooms`, the price is `ah_price`, and the city comes from `location.name`. Only listings whose status is `new` or `active` are retained.
+
+If the collection gives a `next_page_url`, the program requests that page too. It follows these links until there are no more, with a maximum of ten pages and checks for repeated or unexpected page addresses. For this source, the fields needed for matching come from the overview's embedded data; it does not need to visit every property's detail page.
+
+#### Wonen Hartje: follow property links and read labelled details
+
+The program requests [Wonen Hartje's Rotterdam overview](https://wonenhartje.nl/rotterdam/aanbod-rotterdam/) and uses **Beautiful Soup**, an HTML-reading library, to find property links matching that site's Rotterdam rental URL pattern.
+
+For each discovered property, it reads the detail page or a recent cached copy of its parsed details. It finds the page elements containing the price, title and specification labels, including `Slaapkamers`, `Verhuurvorm` and `Status`. It takes the bedroom count from the bedroom specification, rather than treating the overview's room count as bedrooms.
+
+A property must say it is for rent and have an available status. If its status field is empty but the page's availability label says `Beschikbaar`, that label is used. The current reader identifies Rotterdam from the property's Rotterdam URL pattern. It does **not** independently verify the address against a map or postcode database. A simple text check also adds a note when it detects a student-only restriction; it does not understand every possible eligibility condition.
+
+#### Woonzeker: discover pages through a sitemap, then decode embedded data
+
+The program requests [Woonzeker's public property sitemap](https://woonzeker.com/__sitemap__/properties-0.xml). A sitemap is a machine-readable list of URLs. The program keeps links under `/huur/woningen/` and reads their detail pages or recent cached details.
+
+Those pages contain a script block named `__NUXT_DATA__`. This holds the structured data used by the site's Nuxt web framework. Some values refer to other positions in a shared list, so the decoder follows those references to reconstruct the property record.
+
+It then reads the price from `handover.price`, the bedrooms from `characteristic.layout.number_of_bedrooms`, and the city from `address.location`. Both the property's stage and status code must say `available`. A property that has not appeared in the sitemap cannot yet be discovered by this reader.
+
+### 4. Convert the results into one common listing format
+
+The three readers produce the same basic fields, despite getting them from different places. This is an illustrative record, not an actual property:
+
+```json
+{
+  "id": "athome:12345",
+  "source": "At Home Vastgoed",
+  "title": "Example street 10",
+  "city": "Rotterdam",
+  "rent": 1750,
+  "bedrooms": 2,
+  "url": "https://athomevastgoed.nl/example-property"
+}
+```
+
+Prices and bedroom counts are converted to numbers where the reader needs to do so. The common filter then checks city, rent, bedrooms and availability. For example, the record above passes the price and bedroom rules; the same record with rent 1850 or only one bedroom fails. Missing or unreadable price/bedroom values do not qualify.
+
+The program uses explicit fields and fixed rules. It does not use AI to guess missing bedrooms, estimate the rent from a photo, or infer that a two-room apartment has two bedrooms. Its conclusions depend on what each website publishes and on the extraction rules continuing to match that website.
+
+### 5. Compare with history, then send through Gmail
+
+For a normal live check, the program compares qualifying source IDs with the saved history. An ID such as `athome:12345` combines the source with its property identifier. Existing IDs are recognised even though each run uses a fresh temporary computer.
+
+Each source's first successful live check creates a baseline. On later checks, newly discovered matching IDs become pending alerts. Before sending a pending alert, the program checks it against that run's successfully collected results. The source results can include detail records cached within the 15-minute window described below.
+
+The runner connects separately to Gmail's encrypted SMTP service, authenticates using the app password stored in GitHub secrets, and submits the email to the configured recipient. The property websites are not involved in sending the email. The all-matches and random-match controls use current scan results without changing the normal listing history.
+
+### 6. Cache details and recognise failed scans
+
+Normal checks request the discovery pages again, but reuse parsed Wonen Hartje and Woonzeker detail records for up to **15 minutes**. GitHub Actions restores that cache onto the temporary runner and saves it after changes. New links have no cached record, so their detail pages are fetched immediately. The all-matches and random-match commands clear the loaded detail cache before collecting, so they request fresh detail pages.
+
+Caching reduces repeated traffic, but it means a recently changed price or availability can remain out of date until its detail record is refreshed. Even a freshly fetched page can contain stale information supplied by the agent.
+
+A blocked request, timeout, unexpected response or missing required page structure is recorded as a source failure. The HTML reader also checks for common access-challenge page titles. Discovery returning no links on Wonen Hartje or Woonzeker is treated cautiously as a failure rather than assumed to mean there are no properties. A failed source is not treated as a successful empty scan, and its old pending alerts are not sent during that run.
+
+These checks catch many changes, but cannot detect every possible mistake or website redesign. If a site changes its field names, HTML layout, status values or sitemap format, its reader may need updating.
 
 ## Limits
 
