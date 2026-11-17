@@ -17,7 +17,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from sources import Collector, is_match
+from sources import Collector, is_match, listing_warnings, valid_rent, valid_bedrooms
 
 SOURCES = ('athome', 'wonenhartje', 'woonzeker')
 STATE_BRANCH = 'monitor-state'
@@ -94,6 +94,19 @@ def validate_address(value):
     return value
 
 
+def listing_lines(item):
+    rent = f"EUR {item['rent']:.2f} per month" if valid_rent(item.get('rent')) else 'Unknown (could not read)'
+    beds = str(item['bedrooms']) if valid_bedrooms(item.get('bedrooms')) else 'Unknown (could not read)'
+    notes = listing_warnings(item)
+    return [str(item.get('title') or 'Property listing'), f"City: {item.get('city') or 'Unknown'}",
+            'Advertised rent: ' + rent, 'Bedrooms: ' + beds,
+            *(['WARNING: ' + note for note in notes]),
+            *(['SCAN NOTICE: ' + note for note in item.get('scanWarnings', [])]),
+            str(item.get('costNote') or ''), str(item.get('conditionsNote') or ''),
+            'Service charges and utilities may be extra. Check eligibility and availability with the agent.',
+            '', item['url'], '', 'Source: ' + item['source']]
+
+
 class GmailSender:
     def __init__(self, environ=os.environ, smtp_factory=smtplib.SMTP_SSL):
         self.sender = validate_address(environ.get('GMAIL_SENDER'))
@@ -109,15 +122,12 @@ class GmailSender:
     def send(self, item=None):
         msg = EmailMessage()
         msg['From'], msg['To'] = self.sender, self.recipient
-        msg['Subject'] = 'Rotterdam rental alerts: connection test' if item is None else 'New Rotterdam rental listing'
+        msg['Subject'] = ('Rotterdam rental alerts: connection test' if item is None else
+                          'Rotterdam rental listing: details need checking' if listing_warnings(item) else 'New Rotterdam rental listing')
         if item is None:
             body = 'The rental alert program can send email. This is a connection test, not a property listing.'
         else:
-            body = '\n'.join([item['title'], f"City: {item['city']}",
-                f"Advertised rent: EUR {item['rent']:.2f} per month", f"Bedrooms: {item['bedrooms']}",
-                item.get('costNote', ''), item.get('conditionsNote', ''),
-                'Service charges and utilities may be extra. Check eligibility and availability with the agent.',
-                '', item['url'], '', 'Source: ' + item['source']])
+            body = '\n'.join(listing_lines(item))
         msg.set_content(body)
         refused = self.connection.send_message(msg, from_addr=self.sender, to_addrs=[self.recipient])
         if refused:
@@ -127,12 +137,11 @@ class GmailSender:
         msg = EmailMessage()
         msg['From'], msg['To'] = self.sender, self.recipient
         msg['Subject'] = f'Rotterdam rental alerts: {len(items)} current matches'
-        lines = ['Current matching listings, including properties previously emailed.', '']
+        lines = ['Current candidate listings, including properties previously emailed. Unknown details are flagged below.', '']
         if failed_sources:
             lines.extend(['Incomplete scan. Could not check: ' + ', '.join(failed_sources), ''])
         for item in items:
-            lines.extend([item['title'], f"EUR {item['rent']:.2f}/month | {item['bedrooms']} bedrooms | {item['city']}",
-                          item.get('costNote', ''), item.get('conditionsNote', ''), item['url'], 'Source: ' + item['source'], ''])
+            lines.extend([*listing_lines(item), ''])
         if not items:
             lines.append('No current matches found on the sources successfully checked.')
         lines.append('Utilities/service charges may be extra. Confirm availability and eligibility with the agent.')
@@ -151,14 +160,23 @@ def collect_all(collector):
     scans = {}
     for source in SOURCES:
         try:
+            issue_start = len(collector.issues)
             listings = getattr(collector, source)()
-            scans[source] = {'listings': listings}
-            print(f'{source}: {len(listings)} listings, {sum(is_match(item) for item in listings)} eligible matches', flush=True)
+            scans[source] = {'listings': listings, 'warnings': collector.issues[issue_start:]}
+            print(f'{source}: {len(listings)} listings, {sum(is_match(item) for item in listings)} candidates (including unverified details)', flush=True)
         except Exception as error:
             # Exception text from mail libraries can contain private addresses. Only source errors/types are recorded here.
             detail = str(error)[:250] if isinstance(error, (RuntimeError, ValueError)) else type(error).__name__
             scans[source] = {'error': detail}
             print(f'{source}: source check failed ({detail})', flush=True)
+    coverage_notes = [f'Could not check {source} during this scan; results do not cover that website.'
+                      for source, scan in scans.items() if 'error' in scan]
+    for source, scan in scans.items():
+        if scan.get('warnings'):
+            coverage_notes.append(f"{source}: {len(scan['warnings'])} property pages could not be refreshed.")
+    for scan in scans.values():
+        for item in scan.get('listings', []):
+            item['scanWarnings'] = list(coverage_notes)
     collector.save_cache()
     return scans
 
@@ -167,7 +185,9 @@ def send_current(scans, mode, sender_factory=GmailSender, choose=random.choice):
     # These manual replays intentionally ignore history and never change it.
     items = {item['id']: item for scan in scans.values() for item in scan.get('listings', []) if is_match(item)}
     failed = [source for source, scan in scans.items() if 'error' in scan]
-    if not items and (mode == 'send_random' or len(failed) == len(scans)):
+    failed.extend(f"{source} ({len(scan['warnings'])} property pages could not be refreshed)"
+                  for source, scan in scans.items() if scan.get('warnings'))
+    if not items and (mode == 'send_random' or all('error' in scan for scan in scans.values())):
         return 0
     sender = sender_factory()
     try:
@@ -196,9 +216,10 @@ def update_state(state, scans):
     return state
 
 
-def deliver(state, store, sender_factory=GmailSender, limit=5, allowed_sources=None):
+def deliver(state, store, sender_factory=GmailSender, limit=5, allowed_sources=None, allowed_ids=None):
     pending = [(key, value) for key, value in state['listings'].items()
-               if value['status'] == 'pending' and (allowed_sources is None or key.split(':', 1)[0] in allowed_sources)][:limit]
+               if value['status'] == 'pending' and (allowed_sources is None or key.split(':', 1)[0] in allowed_sources)
+               and (allowed_ids is None or key in allowed_ids)][:limit]
     if not pending:
         return 0
     sender = sender_factory()  # Authenticate before claiming any messages.
@@ -218,13 +239,17 @@ def deliver(state, store, sender_factory=GmailSender, limit=5, allowed_sources=N
 
 def summary(scans, mode, state=None, sent=0):
     lines = ['# Rotterdam rental monitor', '', f'Mode: **{mode}**. Emails accepted by Gmail in this run: **{sent}**.', '',
-             '| Source | Listings read | Eligible matches | Result |', '| --- | ---: | ---: | --- |']
+             '| Source | Listings read | Candidates | Result |', '| --- | ---: | ---: | --- |']
     for name, scan in scans.items():
         rows = scan.get('listings', [])
         if 'error' in scan:
             lines.append(f'| {name} | Unknown | Unknown | Unavailable; not checked successfully |')
         else:
-            lines.append(f'| {name} | {len(rows)} | {sum(is_match(row) for row in rows)} | Read successfully |')
+            status = f"Partial details: {len(scan['warnings'])} property pages could not be refreshed" if scan.get('warnings') else 'Read successfully'
+            lines.append(f'| {name} | {len(rows)} | {sum(is_match(row) for row in rows)} | {status} |')
+    unverified = sum(bool(listing_warnings(row)) for scan in scans.values() for row in scan.get('listings', []) if is_match(row))
+    if unverified:
+        lines.extend(['', f'Candidates with unverified details: **{unverified}**. Emails identify what could not be checked.'])
     failed = [name for name, scan in scans.items() if 'error' in scan]
     if failed:
         outcome = 'PARTIAL COVERAGE' if len(failed) < len(scans) else 'NO SOURCE COVERAGE'
@@ -234,7 +259,7 @@ def summary(scans, mode, state=None, sent=0):
         held = sum(row['status'] == 'sending' for row in state['listings'].values())
         lines.extend(['', f'Uncertain deliveries held for review: **{held}**.'])
     lines.extend(['', 'Funda is not connected. A five-minute schedule is best effort. Source access from this runner must be verified.',
-                  'Matching means Rotterdam, advertised rent up to EUR 2,000, at least two bedrooms, and no known closed/unavailable status.',
+                  'Candidates must be in Rotterdam and have no known closed/unavailable status. Known rent must be at most EUR 2,000 and known bedrooms at least two; missing details are emailed with warnings.',
                   'The first successful live scan of each source establishes a baseline and sends no existing listings.'])
     text = '\n'.join(lines) + '\n'
     Path('run-summary.md').write_text(text, encoding='utf8')
@@ -247,6 +272,9 @@ def scan_exit_code(scans):
     failed = [name for name, scan in scans.items() if 'error' in scan]
     for name in failed:
         print(f'::warning title=Rental source unavailable::{name} could not be checked. Coverage is incomplete; see the run summary and source log.', flush=True)
+    for name, scan in scans.items():
+        if scan.get('warnings'):
+            print(f"::warning title=Property details incomplete::{name}: {len(scan['warnings'])} property pages could not be refreshed; see the run summary. Other properties were still processed.", flush=True)
     # A source outage is not a crash of the entire monitor. Complete outages still fail.
     return int(not scans or len(failed) == len(scans))
 
@@ -299,6 +327,8 @@ def main(environ=os.environ):
                 source = key.split(':', 1)[0]
                 if 'error' in scans.get(source, {}):
                     continue
+                if key not in current and scans.get(source, {}).get('warnings'):
+                    continue  # Absence from an incomplete scan does not prove expiration.
                 if key not in current or not is_match(current[key]):
                     row['status'] = 'expired'
                 else:
@@ -308,9 +338,9 @@ def main(environ=os.environ):
             # Held records stay untouched until their Sent-folder outcome is reviewed.
             allowed = {name for name, scan in scans.items() if 'error' not in scan}
             pending = [row for key, row in state['listings'].items()
-                       if row['status'] == 'pending' and key.split(':', 1)[0] in allowed]
+                       if row['status'] == 'pending' and key.split(':', 1)[0] in allowed and key in current]
             if pending:
-                sent = deliver(state, store, lambda: GmailSender(environ), allowed_sources=allowed)
+                sent = deliver(state, store, lambda: GmailSender(environ), allowed_sources=allowed, allowed_ids=set(current))
     finally:
         summary(scans, mode, state, sent)
     return scan_exit_code(scans)
