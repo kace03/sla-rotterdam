@@ -1,0 +1,8 @@
+__pycache__/
+.collector-cache.json
+.env*
+.dev.vars
+run-summary.md
+*.html
+*.zip
+.venv/
