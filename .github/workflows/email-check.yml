@@ -1,8 +1,5 @@
 name: Run rental alerts now
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/email-check.yml]
   workflow_dispatch:
 permissions:
   contents: write
@@ -31,7 +28,7 @@ jobs:
       - id: monitor
         env:
           RUN_MODE: live
-          SEND_ALERTS: 'true'
+          SEND_ALERTS: ${{ vars.SEND_ALERTS || 'true' }}
           GITHUB_TOKEN: ${{ github.token }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
