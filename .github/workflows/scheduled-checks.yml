@@ -1,0 +1,13 @@
+name: Automatic apartment checks
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  check:
+    uses: ./.github/workflows/monitor.yml
+    with:
+      mode: scheduled
+    secrets: inherit
