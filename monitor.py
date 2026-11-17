@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import random
 import smtplib
 import ssl
 import sys
@@ -66,6 +67,8 @@ class GitHubState:
         value = json.loads(base64.b64decode(obj['content']))
         if value.get('version') != 1 or not isinstance(value.get('listings'), dict) or not isinstance(value.get('initialized'), list):
             raise ValueError('Invalid stored state; refusing to reset history')
+        if 'enabled' in value and not isinstance(value['enabled'], bool):
+            raise ValueError('Invalid monitor switch; refusing to check or send')
         self.sha = obj['sha']
         self.last_encoded = json.dumps(value, sort_keys=True)
         return value
@@ -120,6 +123,23 @@ class GmailSender:
         if refused:
             raise RuntimeError('Gmail did not accept the recipient')
 
+    def send_digest(self, items, failed_sources=()):
+        msg = EmailMessage()
+        msg['From'], msg['To'] = self.sender, self.recipient
+        msg['Subject'] = f'Rotterdam rental alerts: {len(items)} current matches'
+        lines = ['Current matching listings, including properties previously emailed.', '']
+        if failed_sources:
+            lines.extend(['Incomplete scan. Could not check: ' + ', '.join(failed_sources), ''])
+        for item in items:
+            lines.extend([item['title'], f"EUR {item['rent']:.2f}/month | {item['bedrooms']} bedrooms | {item['city']}",
+                          item.get('costNote', ''), item.get('conditionsNote', ''), item['url'], 'Source: ' + item['source'], ''])
+        if not items:
+            lines.append('No current matches found on the sources successfully checked.')
+        lines.append('Utilities/service charges may be extra. Confirm availability and eligibility with the agent.')
+        msg.set_content('\n'.join(lines))
+        if self.connection.send_message(msg, from_addr=self.sender, to_addrs=[self.recipient]):
+            raise RuntimeError('Gmail did not accept the recipient')
+
     def close(self):
         try:
             self.connection.quit()
@@ -141,6 +161,23 @@ def collect_all(collector):
             print(f'{source}: source check failed ({detail})', flush=True)
     collector.save_cache()
     return scans
+
+
+def send_current(scans, mode, sender_factory=GmailSender, choose=random.choice):
+    # These manual replays intentionally ignore history and never change it.
+    items = {item['id']: item for scan in scans.values() for item in scan.get('listings', []) if is_match(item)}
+    failed = [source for source, scan in scans.items() if 'error' in scan]
+    if not items and (mode == 'send_random' or len(failed) == len(scans)):
+        return 0
+    sender = sender_factory()
+    try:
+        if mode == 'send_all':
+            sender.send_digest(list(items.values()), failed)
+        else:
+            sender.send(choose(list(items.values())))
+    finally:
+        sender.close()
+    return 1
 
 
 def update_state(state, scans):
@@ -202,8 +239,21 @@ def main(environ=os.environ):
     mode = environ.get('RUN_MODE', 'preview')
     if mode == 'scheduled':
         mode = 'live' if environ.get('SEND_ALERTS') == 'true' else 'preview'
-    if mode not in ('preview', 'live', 'test_email'):
+    if mode not in ('preview', 'live', 'test_email', 'send_all', 'send_random', 'start', 'stop'):
         raise ValueError('Unknown run mode')
+    # Every hosted command reads the same persistent switch before scraping or SMTP.
+    store = GitHubState(environ) if environ.get('GITHUB_TOKEN') else None
+    if mode != 'preview' and not store:
+        raise ValueError('Use the hosted controls for email and start/stop commands')
+    state = store.load() if store else None
+    if mode in ('start', 'stop'):
+        state['enabled'] = mode == 'start'
+        store.save(state)
+        summary({}, 'Automatic checks enabled' if state['enabled'] else 'Stopped: no website checks or email', state)
+        return 0
+    if state is not None and not state.get('enabled', True):
+        summary({}, 'Stopped: no website checks or email', state)
+        return 0
     if mode == 'test_email':
         sender = GmailSender(environ)
         try:
@@ -214,12 +264,15 @@ def main(environ=os.environ):
         return 0
     if mode == 'live' and environ.get('SEND_ALERTS') != 'true':
         raise ValueError('Live alerts are disabled. Enable SEND_ALERTS only after reviewing the preview and receiving a test email.')
-    store = GitHubState(environ) if mode == 'live' else None
-    state = store.load() if store else None  # Never scrape/send with missing or unreadable saved state.
-    scans = collect_all(Collector())
+    collector = Collector()
+    if mode in ('send_all', 'send_random'):
+        collector.cache = {}  # Manual requests recheck details rather than reuse the 15-minute cache.
+    scans = collect_all(collector)
     sent = 0
     try:
-        if store:
+        if mode in ('send_all', 'send_random'):
+            sent = send_current(scans, mode, lambda: GmailSender(environ))
+        if mode == 'live':
             update_state(state, scans)
             store.save(state)
             # Revalidate pending matches against the current successful source scan before emailing.
