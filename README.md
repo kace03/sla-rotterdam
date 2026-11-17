@@ -30,11 +30,13 @@ STOP cannot recall an email Gmail already accepted. GitHub still wakes scheduled
 
 Missing or unreadable rent, bedroom count or availability no longer discards a Rotterdam candidate. The email marks the field **Unknown**, explains what could not be verified, and asks you to check the listing yourself. Known rent above EUR 2,000, fewer than two known bedrooms, a different city or a known unavailable status still excludes it. The city must be identifiable as Rotterdam from the source data, the Wonen Hartje Rotterdam URL pattern, or previously read details; an entirely unknown city is not guessed.
 
-Student-only and other restrictions are included as notes where detected. A match still needs checking with the agent for eligibility, actual costs and availability.
+Listings explicitly restricted to students are excluded from candidates and from every property-email command. Other restrictions are included as notes where detected. A match still needs checking with the agent for eligibility, actual costs and availability.
+
+The student filter reads property descriptions and terms for explicit Dutch and English wording such as “alleen voor 2 studenten,” “uitsluitend bestemd voor studenten,” “students only,” or “must be a student.” Merely mentioning students, living near a university, or accepting students **and** professionals does not make a listing student-only. The filter uses text rules, so unusual wording can be missed. If the description cannot be read, the listing can still be sent under the existing incomplete-details policy, with a warning that its student restriction could not be checked.
 
 ## Automatic emails
 
-The schedule requests a check every five minutes. Each source's first successful scan records existing matches without emailing them. Later, a previously unseen matching listing is emailed once per source ID. The same home advertised on two websites can produce two alerts. Normal checks send at most five pending alerts per run.
+The schedule requests a check every five minutes. Each source's first successful scan records existing matches without emailing them. Later, a previously unseen matching listing is emailed once per source ID. The same home advertised on two websites can produce two alerts. Normal checks send **every new qualifying candidate found in that run**, with one email per listing. There is no five-listing cap and no random selection in automatic checks. Gmail errors or sending limits can still interrupt delivery; accepted messages are recorded and unsent pending listings remain for a later check.
 
 Before sending, the program saves a delivery claim. After Gmail accepts the email it records the result. If sending fails ambiguously, that listing is held for review instead of automatically risking a duplicate. Failed source checks do not reset history or send old pending listings from that source.
 
@@ -68,7 +70,7 @@ The program requests [At Home's property overview](https://athomevastgoed.nl/won
 
 The reader extracts each property's ID, address/title, city, advertised price, bedroom count, link and status. For example, the bedroom field is `no_bedrooms`, the price is `ah_price`, and the city comes from `location.name`. Only listings whose status is `new` or `active` are retained.
 
-If the collection gives a `next_page_url`, the program requests that page too. It follows these links until there are no more, with a maximum of ten pages and checks for repeated or unexpected page addresses. For this source, the fields needed for matching come from the overview's embedded data; it does not need to visit every property's detail page.
+If the collection gives a `next_page_url`, the program requests that page too. It follows these links until there are no more, with a maximum of ten pages and checks for repeated or unexpected page addresses. Rent, bedrooms and city come from this overview data. For listings that pass those initial checks, the reader also opens the property page to check the description and other property text for student-only restrictions. These description checks use the same 15-minute detail cache; non-candidates do not need an extra detail-page request.
 
 #### Wonen Hartje: follow property links and read labelled details
 
@@ -76,7 +78,7 @@ The program requests [Wonen Hartje's Rotterdam overview](https://wonenhartje.nl/
 
 For each discovered property, it reads the detail page or a recent cached copy of its parsed details. It finds the page elements containing the price, title and specification labels, including `Slaapkamers`, `Verhuurvorm` and `Status`. It takes the bedroom count from the bedroom specification, rather than treating the overview's room count as bedrooms. If a field is missing, it is kept as unknown instead of stopping the source scan.
 
-Known non-rental or unavailable properties are excluded. Missing availability is flagged for manual checking. If its status field is empty but the page's availability label says `Beschikbaar`, that label is used. The current reader identifies Rotterdam from the property's Rotterdam URL pattern. It does **not** independently verify the address against a map or postcode database. A simple text check also adds a note when it detects a student-only restriction; it does not understand every possible eligibility condition.
+Known non-rental or unavailable properties are excluded. Missing availability is flagged for manual checking. If its status field is empty but the page's availability label says `Beschikbaar`, that label is used. The current reader identifies Rotterdam from the property's Rotterdam URL pattern. It does **not** independently verify the address against a map or postcode database. Property text is checked for explicit student-only restrictions, which exclude the listing. Navigation, footer and related-property sections are removed before reading the text to reduce unrelated matches; the filter does not understand every possible eligibility condition.
 
 #### Woonzeker: discover pages through a sitemap, then decode embedded data
 
@@ -84,7 +86,7 @@ The program requests [Woonzeker's public property sitemap](https://woonzeker.com
 
 Those pages contain a script block named `__NUXT_DATA__`. This holds the structured data used by the site's Nuxt web framework. Some values refer to other positions in a shared list, so the decoder follows those references to reconstruct the property record.
 
-It then reads the price from `handover.price`, the bedrooms from `characteristic.layout.number_of_bedrooms`, and the city from `address.location`. The reader treats the property as confirmed available when both its stage and status code say `available`. Missing availability fields are marked unknown; an explicit non-available status still excludes it. A property that has not appeared in the sitemap cannot yet be discovered by this reader.
+It then reads the price from `handover.price`, the bedrooms from `characteristic.layout.number_of_bedrooms`, and the city from `address.location`. The reader treats the property as confirmed available when both its stage and status code say `available`. Missing availability fields are marked unknown; an explicit non-available status still excludes it. The property's description and terms fields are also checked for student-only restrictions, using that property's data rather than global application text or other homes' descriptions. A property that has not appeared in the sitemap cannot yet be discovered by this reader.
 
 ### 4. Convert the results into one common listing format
 
@@ -116,7 +118,7 @@ The runner connects separately to Gmail's encrypted SMTP service, authenticates 
 
 ### 6. Cache details and recognise failed scans
 
-Normal checks request the discovery pages again, but reuse parsed Wonen Hartje and Woonzeker detail records for up to **15 minutes**. GitHub Actions restores that cache onto the temporary runner and saves it after changes. New links have no cached record, so their detail pages are fetched immediately. The all-matches and random-match commands clear the loaded detail cache before collecting, so they request fresh detail pages.
+Normal checks request the discovery pages again, but reuse parsed At Home student-restriction checks and Wonen Hartje/Woonzeker detail records for up to **15 minutes**. GitHub Actions restores that cache onto the temporary runner and saves it after changes. New links have no cached record, so their detail pages are fetched immediately. The all-matches and random-match commands clear the loaded detail cache before collecting, so they request fresh detail pages.
 
 Caching reduces repeated traffic, but it means a recently changed price or availability can remain out of date until its detail record is refreshed. Even a freshly fetched page can contain stale information supplied by the agent.
 
@@ -126,7 +128,7 @@ If at least one source succeeds, the monitor continues with those sources and ad
 
 A site may allow requests from a home computer while blocking GitHub's runner. For example, Wonen Hartje can return a page titled “One moment, please…” instead of its listings. The monitor recognises that as an access challenge; it cannot treat it as property data or promise to get through it. It tries the source again on the next normal check. Changing the rent limit does not cause this blocking.
 
-Individual Wonen Hartje and Woonzeker detail pages are isolated too: if one cannot be read, other properties are still processed. The failed property uses previously cached details with a warning where available. Without cached details, it keeps its discovered link and unknown fields; it can be emailed only if Rotterdam is still identifiable. Cached closed or otherwise disqualifying details still exclude it. These fallback records are not saved as fresh successful detail reads.
+Individual detail-page requests are isolated too: if one cannot be read, other properties are still processed. The failed property uses previously cached details with a warning where available. Without cached details, it keeps its discovered link and unknown fields; it can be emailed only if Rotterdam is still identifiable. Cached closed or otherwise disqualifying details still exclude it. These fallback records are not saved as fresh successful detail reads.
 
 Single-listing emails include notices when other websites or property pages could not be checked during that scan. Combined emails also identify incomplete coverage. Pending records absent from an incomplete source scan are left pending, rather than treated as expired or sent from unverified old history.
 
@@ -142,4 +144,4 @@ The dedicated Gmail connection has been tested and receipt confirmed. All three 
 
 The existing repository secrets are `GMAIL_SENDER`, `GMAIL_APP_PASSWORD` and `ALERT_RECIPIENT`. Change the receiving address through GitHub Settings → Secrets and variables → Actions. Never put an app password in a source file. The optional `SEND_ALERTS=false` repository variable still disables normal automatic property emails; manual email controls are governed by the start/stop switch.
 
-The program is split between `monitor.py` (commands, Gmail and saved history), `sources.py` (collection and matching), `agencies.py` (agency page parsing) and the workflows under `.github/workflows`. Tests run with `python -m unittest discover` after installing `requirements.txt`. A local `python monitor.py` defaults to a read-only preview.
+The program is split between `monitor.py` (commands, Gmail and saved history), `sources.py` (collection and matching), `agencies.py` (agency page parsing), `eligibility.py` (student-only text checks) and the workflows under `.github/workflows`. Tests run with `python -m unittest discover` after installing `requirements.txt`. A local `python monitor.py` defaults to a read-only preview.
