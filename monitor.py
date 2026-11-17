@@ -216,7 +216,7 @@ def update_state(state, scans):
     return state
 
 
-def deliver(state, store, sender_factory=GmailSender, limit=5, allowed_sources=None, allowed_ids=None):
+def deliver(state, store, sender_factory=GmailSender, limit=None, allowed_sources=None, allowed_ids=None):
     pending = [(key, value) for key, value in state['listings'].items()
                if value['status'] == 'pending' and (allowed_sources is None or key.split(':', 1)[0] in allowed_sources)
                and (allowed_ids is None or key in allowed_ids)][:limit]
