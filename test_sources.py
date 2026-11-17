@@ -71,6 +71,10 @@ class SourceTests(unittest.TestCase):
         html='<main><h1>Rotterdam apartment</h1><p>For students or professionals. A spacious two bedroom home.</p><div class="related-properties">Only for students.</div></main><footer>Students only</footer>'
         self.assertFalse(at_home_restrictions(html,'')['studentOnly'])
 
+    def test_at_home_inline_template_description_is_read(self):
+        html='<body><template><main><h1>Rotterdam apartment</h1><section class="property-description-text">Alleen voor 2 studenten die studeren in Rotterdam.</section></main></template></body>'
+        self.assertTrue(at_home_restrictions(html,'')['studentOnly'])
+
     def test_woonzeker_missing_fields_are_unknown_but_explicit_closed_still_excludes(self):
         item={'title':'Example','handover':None,'characteristic':None,'address':{'location':'Rotterdam'},'stage':'available'}
         with patch('agencies.decode_nuxt',return_value={'data':{'property':item}}):
