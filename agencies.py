@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 
 from bs4 import BeautifulSoup
+from eligibility import student_assessment, listing_page_text, property_text
 
 
 
@@ -71,12 +72,12 @@ def hartje_detail(html, url):
     page_label = soup.select_one('.mkdf-property-title-right')
     if status in ('', 'Empty', 'Unknown') and page_label and page_label.get_text(' ', strip=True).casefold() == 'beschikbaar':
         status = 'Beschikbaar (page label; status field empty)'
-    description = soup.get_text(' ', strip=True)
+    description = listing_page_text(html)
     return {'title': title.get_text(' ', strip=True).removesuffix(' - Wonen Hartje'), 'city': 'Rotterdam' if '-rotterdam-' in urlparse(url).path else '',
         'url': url, 'rent': rent, 'bedrooms': int(beds[1]) if beds else None,
         'rental': specs.get('Verhuurvorm', 'te huur').casefold() == 'te huur', 'status': status,
         'openForResponses': None if status in ('', 'Empty', 'Unknown') else status.casefold().startswith('beschikbaar'),
-        'conditionsNote': 'Student restriction mentioned; check listing terms' if re.search(r'alleen voor.*student', description, re.I) else ''}
+        **student_assessment(description), 'conditionsNote': ''}
 
 
 def zeker_detail(html, url):
@@ -96,4 +97,4 @@ def zeker_detail(html, url):
         'url': url, 'rent': rent, 'bedrooms': beds, 'rental': '/huur/woningen/' in urlparse(url).path,
         'status': status.get('label', value.get('stage', 'Unknown')),
         'openForResponses': available,
-        'conditionsNote': ''}
+        **student_assessment(property_text(value)), 'conditionsNote': ''}
