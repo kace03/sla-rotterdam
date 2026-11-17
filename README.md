@@ -120,6 +120,10 @@ Caching reduces repeated traffic, but it means a recently changed price or avail
 
 A blocked request, timeout, unexpected response or missing required page structure is recorded as a source failure. The HTML reader also checks for common access-challenge page titles. Discovery returning no links on Wonen Hartje or Woonzeker is treated cautiously as a failure rather than assumed to mean there are no properties. A failed source is not treated as a successful empty scan, and its old pending alerts are not sent during that run.
 
+If at least one source succeeds, the monitor continues with those sources and adds a GitHub warning and a **PARTIAL COVERAGE** notice to the summary. Failed-source counts are shown as unknown, not zero. A green run with this warning does not mean every website was checked. If every source fails, the run fails. State or email errors still fail the run too.
+
+A site may allow requests from a home computer while blocking GitHub's runner. For example, Wonen Hartje can return a page titled “One moment, please…” instead of its listings. The monitor recognises that as an access challenge; it cannot treat it as property data or promise to get through it. It tries the source again on the next normal check. Changing the rent limit does not cause this blocking.
+
 These checks catch many changes, but cannot detect every possible mistake or website redesign. If a site changes its field names, HTML layout, status values or sitemap format, its reader may need updating.
 
 ## Limits
