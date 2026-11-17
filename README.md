@@ -24,7 +24,7 @@ STOP cannot recall an email Gmail already accepted. GitHub still wakes scheduled
 ## What counts as a match
 
 - The listing says **Rotterdam**, not a nearby town.
-- Advertised monthly rent is **up to and including EUR 1,800**. Utilities and service charges may cost extra.
+- Advertised monthly rent is **up to and including EUR 2,000**. Utilities and service charges may cost extra.
 - It explicitly has **at least two bedrooms**. Two rooms alone is not enough.
 - It is not marked rented, closed or unavailable in the data we can read.
 
@@ -100,7 +100,7 @@ The three readers produce the same basic fields, despite getting them from diffe
 }
 ```
 
-Prices and bedroom counts are converted to numbers where the reader needs to do so. The common filter then checks city, rent, bedrooms and availability. For example, the record above passes the price and bedroom rules; the same record with rent 1850 or only one bedroom fails. Missing or unreadable price/bedroom values do not qualify.
+Prices and bedroom counts are converted to numbers where the reader needs to do so. The common filter then checks city, rent, bedrooms and availability. For example, the record above passes the price and bedroom rules; the same record with rent 2050 or only one bedroom fails. Missing or unreadable price/bedroom values do not qualify.
 
 The program uses explicit fields and fixed rules. It does not use AI to guess missing bedrooms, estimate the rent from a photo, or infer that a two-room apartment has two bedrooms. Its conclusions depend on what each website publishes and on the extraction rules continuing to match that website.
 
