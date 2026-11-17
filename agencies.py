@@ -62,9 +62,9 @@ def hartje_detail(html, url):
             specs[name] = text[len(name):].strip()
     price = soup.select_one('.wh-property-price')
     title = soup.title or soup.find('h1') or soup.select_one('.mkdf-property-title-left')
-    if not price or not title or 'Verhuurvorm' not in specs:
+    if not title:
         raise ValueError('Wonen Hartje property schema missing')
-    digits = re.search(r'\d[\d.,]*', price.get_text())
+    digits = re.search(r'\d[\d.,]*', price.get_text()) if price else None
     rent = float(digits[0].replace('.', '').replace(',', '.')) if digits else None
     beds = re.match(r'^(\d+)\b', specs.get('Slaapkamers', fields.get('Slaapkamers', '')))
     status = fields.get('Status', 'Unknown')
@@ -74,8 +74,8 @@ def hartje_detail(html, url):
     description = soup.get_text(' ', strip=True)
     return {'title': title.get_text(' ', strip=True).removesuffix(' - Wonen Hartje'), 'city': 'Rotterdam' if '-rotterdam-' in urlparse(url).path else '',
         'url': url, 'rent': rent, 'bedrooms': int(beds[1]) if beds else None,
-        'rental': specs['Verhuurvorm'].casefold() == 'te huur', 'status': status,
-        'openForResponses': status.casefold().startswith('beschikbaar'),
+        'rental': specs.get('Verhuurvorm', 'te huur').casefold() == 'te huur', 'status': status,
+        'openForResponses': None if status in ('', 'Empty', 'Unknown') else status.casefold().startswith('beschikbaar'),
         'conditionsNote': 'Student restriction mentioned; check listing terms' if re.search(r'alleen voor.*student', description, re.I) else ''}
 
 
@@ -86,14 +86,14 @@ def zeker_detail(html, url):
     if len(candidates) != 1:
         raise ValueError('Woonzeker property data missing or ambiguous')
     value = candidates[0]
-    status = value.get('status', {})
-    rent = value.get('handover', {}).get('price')
-    beds = value.get('characteristic', {}).get('layout', {}).get('number_of_bedrooms')
+    status = value.get('status') or {}
+    rent = (value.get('handover') or {}).get('price')
+    beds = ((value.get('characteristic') or {}).get('layout') or {}).get('number_of_bedrooms')
+    availability = (value.get('stage'), status.get('code'))
+    known_closed = any(part not in (None, '', 'unknown', 'available') for part in availability)
+    available = False if known_closed else True if availability == ('available', 'available') else None
     return {'title': value.get('title', ''), 'city': value.get('address', {}).get('location', ''),
         'url': url, 'rent': rent, 'bedrooms': beds, 'rental': '/huur/woningen/' in urlparse(url).path,
         'status': status.get('label', value.get('stage', 'Unknown')),
-        'openForResponses': value.get('stage') == 'available' and status.get('code') == 'available',
+        'openForResponses': available,
         'conditionsNote': ''}
-
-
-
