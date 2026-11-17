@@ -226,7 +226,7 @@ def summary(scans, mode, state=None, sent=0):
         held = sum(row['status'] == 'sending' for row in state['listings'].values())
         lines.extend(['', f'Uncertain deliveries held for review: **{held}**.'])
     lines.extend(['', 'Funda is not connected. A five-minute schedule is best effort. Source access from this runner must be verified.',
-                  'Matching means Rotterdam, advertised rent up to EUR 1,800, at least two bedrooms, and no known closed/unavailable status.',
+                  'Matching means Rotterdam, advertised rent up to EUR 2,000, at least two bedrooms, and no known closed/unavailable status.',
                   'The first successful live scan of each source establishes a baseline and sends no existing listings.'])
     text = '\n'.join(lines) + '\n'
     Path('run-summary.md').write_text(text, encoding='utf8')
