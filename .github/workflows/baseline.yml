@@ -1,8 +1,5 @@
 name: Initialize existing listings without email
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/baseline.yml]
   workflow_dispatch:
 permissions:
   contents: write
