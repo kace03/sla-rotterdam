@@ -112,11 +112,43 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(state['listings'][new['id']]['status'],'pending')
         self.assertEqual(len(state['listings']),2)
 
-    def test_filters_include_known_closed_status_and_unknown_bedrooms(self):
+    def test_filters_exclude_known_bad_values_but_keep_unknown_details(self):
         self.assertTrue(is_match(HOME))
         self.assertTrue(is_match({**HOME, 'rent':2000}))
-        for patch in [{'city':'Schiedam'},{'rent':2000.01},{'bedrooms':None},{'available':False}]:
+        for patch in [{'bedrooms':None},{'rent':None},{'available':None}]:
+            self.assertTrue(is_match({**HOME,**patch}))
+        for patch in [{'city':'Schiedam'},{'city':''},{'rent':2000.01},{'bedrooms':1},{'available':False}]:
             self.assertFalse(is_match({**HOME,**patch}))
+
+    def test_unknown_details_are_explained_in_single_and_digest_email(self):
+        messages=[]
+        class SMTP:
+            def __init__(self,*args,**kwargs): pass
+            def login(self,*args): pass
+            def send_message(self,msg,**kwargs): messages.append(msg);return {}
+            def quit(self): pass
+        env={'GMAIL_SENDER':'sender@gmail.com','ALERT_RECIPIENT':'friend@example.com','GMAIL_APP_PASSWORD':'abcdefghijklmnop'}
+        sender=GmailSender(env,smtp_factory=SMTP)
+        item={**HOME,'rent':None,'bedrooms':None,'available':None}
+        sender.send(item);sender.send_digest([item]);sender.close()
+        for msg in messages:
+            body=msg.get_content()
+            self.assertIn('Could not read the rent',body)
+            self.assertIn('Could not read the bedroom count',body)
+            self.assertIn('Could not verify current availability',body)
+            self.assertIn(HOME['url'],body)
+        self.assertIn('details need checking',messages[0]['Subject'])
+
+    def test_incomplete_scan_neither_expires_nor_sends_an_unseen_pending_record(self):
+        state=empty_state();state['initialized']=['athome']
+        state['listings']['athome:missing']={'status':'pending','item':{**HOME,'id':'athome:missing'}}
+        scans={'athome':{'listings':[HOME],'warnings':[{'url':'https://example.com','reason':'ValueError'}]}}
+        sender=Sender()
+        with patch('monitor.GitHubState') as store, patch('monitor.Collector'), patch('monitor.collect_all',return_value=scans), patch('monitor.GmailSender',return_value=sender), patch('monitor.summary'), patch('builtins.print'):
+            store.return_value.load.return_value=state
+            self.assertEqual(main({'RUN_MODE':'live','SEND_ALERTS':'true','GITHUB_TOKEN':'temporary'}),0)
+        self.assertEqual(sender.items,[HOME])
+        self.assertEqual(state['listings']['athome:missing']['status'],'pending')
 
     def test_durable_claim_precedes_send_and_accepted_items_are_not_resent(self):
         state=empty_state(); state['listings']['athome:1']={'status':'pending','item':HOME}
