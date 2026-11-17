@@ -16,7 +16,6 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 ATHOME = 'https://athomevastgoed.nl/woningaanbod'
-PARARIUS = 'https://www.pararius.com/apartments/rotterdam/0-1800'
 
 
 def checked_url(url, host):
@@ -78,57 +77,6 @@ def at_home_page(html):
     return result, next_url
 
 
-def ld_objects(html):
-    soup = BeautifulSoup(html, 'html.parser')
-    for script in soup.select('script[type="application/ld+json"]'):
-        parsed = json.loads(script.string or script.get_text())
-        roots = parsed if isinstance(parsed, list) else [parsed]
-        for root in roots:
-            if isinstance(root, dict):
-                yield root
-                yield from (node for node in root.get('@graph', []) if isinstance(node, dict))
-
-
-def pararius_search(html):
-    for root in ld_objects(html):
-        entity = root.get('mainEntity', {})
-        if isinstance(entity, dict) and entity.get('@type') == 'ItemList':
-            result = []
-            for row in entity.get('itemListElement', []):
-                item = row.get('item', {})
-                url = checked_url(item.get('url', ''), 'www.pararius.com')
-                # Restrict to the Rotterdam rental URLs from this actual search response.
-                match = re.match(r'^/(?:apartment|house|studio|room)-for-rent/rotterdam/([a-f0-9]+)/', urlparse(url).path)
-                if not match:
-                    continue
-                result.append({'id': f'pararius:{match[1]}', 'url': url,
-                               'rent': amount(item.get('offers', {}).get('price'))})
-            return result
-    raise ValueError('Pararius search listing data missing; source was not checked')
-
-
-def pararius_detail(html, url):
-    for root in ld_objects(html):
-        types = root.get('@type', [])
-        types = [types] if isinstance(types, str) else types
-        if 'RealEstateListing' not in types:
-            continue
-        address, offer = root.get('address', {}), root.get('offers', {})
-        if isinstance(offer, list):
-            offer = offer[0] if offer else {}
-        value = amount(offer.get('price')) if offer.get('priceCurrency') == 'EUR' else None
-        identifier = re.search(r'/rotterdam/([a-f0-9]+)/', urlparse(url).path)
-        if not identifier:
-            raise ValueError('Unexpected Pararius detail URL')
-        return dict(id=f'pararius:{identifier[1]}', source='Pararius',
-            title=root.get('name') or address.get('streetAddress') or '',
-            city=address.get('addressLocality') or '', rent=value,
-            bedrooms=bedrooms(root.get('numberOfBedrooms')), url=url,
-            available=offer.get('availability') not in ('https://schema.org/OutOfStock', 'https://schema.org/SoldOut', 'https://schema.org/Discontinued'),
-            costNote=f'EUR {value} per month as listed; additional costs may apply')
-    raise ValueError('Pararius detail listing data missing')
-
-
 class Collector:
     def __init__(self, cache_path=Path('.collector-cache.json'), fetcher=None):
         self.session = requests.Session(impersonate='chrome') if fetcher is None else None
@@ -168,30 +116,6 @@ class Collector:
             items, url = at_home_page(self.get(url))
             all_items.extend(items)
         return list({item['id']: item for item in all_items}.values())
-
-    def pararius(self, detail_limit=30):
-        search = pararius_search(self.get(PARARIUS))
-        result, fetched = [], 0
-        for row in search:
-            if row['rent'] is None or row['rent'] > 1800:
-                continue
-            saved = self.cache.get(row['url'])
-            fresh = (isinstance(saved, dict) and isinstance(saved.get('item'), dict)
-                     and time.time() - saved.get('time', 0) < 21600)
-            if fresh:
-                item = dict(saved['item'])
-            else:
-                if fetched >= detail_limit:
-                    raise RuntimeError('Detail request limit reached; source scan incomplete')
-                item = pararius_detail(self.get(row['url']), row['url'])
-                self.cache[row['url']] = {'time': int(time.time()), 'item': item}
-                fetched += 1
-            # Detail and search may momentarily disagree; use the higher advertised price.
-            if item['rent'] is not None:
-                item['rent'] = max(item['rent'], row['rent'])
-                item['costNote'] = f"EUR {item['rent']} per month; check the page for service charges and utilities"
-            result.append(item)
-        return result
 
     def save_cache(self):
         # Keep only current/recent data so a hosted runner cache stays small.
