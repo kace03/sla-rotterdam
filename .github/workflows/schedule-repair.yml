@@ -1,4 +1,4 @@
-name: Repair scheduler registration (no scraping or email)
+name: Verify timer command while paused
 on:
   push:
     branches: [main]
@@ -7,15 +7,12 @@ permissions:
   actions: write
   contents: read
 jobs:
-  repair:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Re-register only the automatic checker
+      - name: Dispatch the registered checker; its saved STOP switch remains in force
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          gh api --method PUT "repos/$GH_REPO/actions/workflows/scheduled-checks.yml/disable"
-          gh api --method PUT "repos/$GH_REPO/actions/workflows/scheduled-checks.yml/enable"
-          gh api "repos/$GH_REPO/actions/workflows/scheduled-checks.yml" --jq '{id, state, path}'
+        run: gh api --method POST "repos/$GH_REPO/actions/workflows/scheduled-checks.yml/dispatches" -f ref=main
