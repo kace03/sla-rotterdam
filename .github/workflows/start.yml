@@ -1,0 +1,11 @@
+name: START automatic monitoring
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  command:
+    uses: ./.github/workflows/monitor.yml
+    with:
+      mode: start
+    secrets: inherit
