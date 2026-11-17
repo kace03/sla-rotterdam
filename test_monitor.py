@@ -94,7 +94,8 @@ class MonitorTests(unittest.TestCase):
 
     def test_filters_include_known_closed_status_and_unknown_bedrooms(self):
         self.assertTrue(is_match(HOME))
-        for patch in [{'city':'Schiedam'},{'rent':1800.01},{'bedrooms':None},{'available':False}]:
+        self.assertTrue(is_match({**HOME, 'rent':2000}))
+        for patch in [{'city':'Schiedam'},{'rent':2000.01},{'bedrooms':None},{'available':False}]:
             self.assertFalse(is_match({**HOME,**patch}))
 
     def test_durable_claim_precedes_send_and_accepted_items_are_not_resent(self):
