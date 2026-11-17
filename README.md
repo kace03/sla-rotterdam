@@ -21,6 +21,16 @@ After submitting a command, open its newest run. Its summary shows what was chec
 
 STOP cannot recall an email Gmail already accepted. GitHub still wakes scheduled jobs to read the switch while stopped, but they do not visit property websites or send email. START does not email all old listings.
 
+## Confirming that checks are running
+
+The START command only saves the enabled switch. Its green check does not mean a property scan happened. That page is a report for that one command; it does not update itself with later checks.
+
+Open [Apartment alerts](https://github.com/kace03/sla-rotterdam/actions/workflows/monitor.yml) and select the newest run. The summary now shows a report timestamp, the websites checked successfully, current candidate counts, new candidates compared with history, previously seen candidates, student-only exclusions, emails accepted by Gmail, and pending or uncertain deliveries. **No new candidates found** means the successfully checked websites had no candidates newly qualifying against the saved history. A partial-coverage warning means some websites or details could not be checked.
+
+Mode **live** is a normal check that can send new-listing emails. Mode **preview** reads the sites and compares history, but does not send listing emails or change history. A first successful live scan records existing listings as a baseline rather than sending them. For an immediate normal check, use [Check for new listings now](https://github.com/kace03/sla-rotterdam/actions/workflows/email-check.yml).
+
+To verify the repeating schedule specifically, use [the scheduled-runs filter](https://github.com/kace03/sla-rotterdam/actions/workflows/monitor.yml?query=event%3Aschedule). Scheduled runs should appear separately from manual commands and code-change previews. The enabled switch and an active workflow alone do not prove scheduled runs have actually started; check the timestamps on those scheduled runs. The five-minute interval remains best effort.
+
 ## What counts as a match
 
 - The listing says **Rotterdam**, not a nearby town.
