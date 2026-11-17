@@ -2,7 +2,7 @@
 
 The current free setup uses **GitHub + a dedicated Gmail account**. It does not require Cloudflare, a domain name, a Google developer project, or a computer left running.
 
-The software checks **At Home Vastgoed, Pararius, Wonen Hartje and Woonzeker** directly. It does not read website email alerts. Funda is not connected yet.
+The software checks **At Home Vastgoed, Wonen Hartje and Woonzeker** directly. It does not read website email alerts. Funda is not connected.
 
 **Status:** software prepared for this repository. Check Actions → Apartment alerts for the hosted preview result. Gmail credentials and live alerts must be configured separately; uploading code does not enable property emails.
 
@@ -75,7 +75,7 @@ To pause scheduled checks, set `MONITOR_ENABLED` to `false`. To allow previews b
 
 This is a best-effort free monitor. GitHub can delay or drop scheduled runs, and public-repository schedules can be disabled after 60 days without repository activity. It is not a guarantee of five-minute detection or of beating other applicants.
 
-At Home follows its listing pagination. Pararius checks its latest 30 Rotterdam rentals in the price range. Wonen Hartje reads its Rotterdam offer page. Woonzeker discovers URLs through its public property sitemap; that sitemap's publication delay has not been measured. Detail caching reduces repeated requests; newly discovered URLs are checked immediately, while cached Wonen Hartje and Woonzeker details refresh after 15 minutes.
+At Home follows its listing pagination. Wonen Hartje reads its Rotterdam offer page. Woonzeker discovers URLs through its public property sitemap; that sitemap's publication delay has not been measured. Detail caching reduces repeated requests; newly discovered URLs are checked immediately, while cached Wonen Hartje and Woonzeker details refresh after 15 minutes.
 
 Keep using manual checks for important opportunities until the hosted monitor has demonstrated reliable operation. None of the tests guarantee availability, suitability, or acceptance by an agent.
 
@@ -91,7 +91,7 @@ State writes failing, missing history or an unexpected state format stop the run
 
 - 10 tests for initial baselines, matching, unavailable listings, persistent delivery claims, duplicate prevention, failed state writes, mail construction, GitHub state requests and agency data parsing.
 - The integrated Wonen Hartje and Woonzeker adapters parsed the previous live captures successfully: 10 rental properties and 46 rental properties respectively, yielding 1 and 2 available-looking matches.
-- Earlier live access tests succeeded for all four source sites from the development environment.
+- Hosted live previews successfully read all three included source sites from GitHub.
 - SMTP, GitHub-hosted source access, remote state writes and end-to-end delivery still need account-backed tests.
 
 For local verification after installing `requirements.txt`, run `python -m unittest discover`. Running `python monitor.py` defaults to preview mode and does not send mail.
