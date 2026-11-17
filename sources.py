@@ -219,9 +219,10 @@ class Collector:
         url = 'https://wonenhartje.nl/rotterdam/aanbod-rotterdam/'
         soup = BeautifulSoup(self.get(url), 'html.parser')
         links = list(dict.fromkeys(urljoin(url, a['href']) for a in soup.select('a[href]')
-            if re.match(r'^https://wonenhartje\.nl/object/[^/]+-rotterdam-h\d+/$', urljoin(url, a['href']))))
+            if re.match(r'^https://wonenhartje\.nl/object/[^/]+-rotterdam-h\d+/?$', urljoin(url, a['href']))))
         if not links or len(links) > 70:
-            raise ValueError('Wonen Hartje discovery changed; no complete scan')
+            title = soup.title.get_text(' ', strip=True) if soup.title else 'No title'
+            raise ValueError(f'Wonen Hartje discovery returned {len(links)} listing links ({title[:80]}); no complete scan')
         result = []
         for link in links:
             row = self.cached_detail(link, hartje_detail)
